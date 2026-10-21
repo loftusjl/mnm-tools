@@ -243,6 +243,7 @@ function loadVendorData() {
 // cached in the app's data folder and refreshed daily; offline, the cache is used.
 const atlasFile = () => path.join(app.getPath('userData'), 'atlas-vendors.json');
 const ATLAS_MAX_AGE = 24 * 3600 * 1000;
+const ATLAS_VERSION = 2;   // bump when the cached shape changes (2: NPCs as well as vendors)
 let atlasCache = null;   // { fetchedAt, vendors }
 let atlasFetching = false;
 
@@ -250,7 +251,7 @@ function atlasData() {
   if (!atlasCache) {
     try { atlasCache = JSON.parse(fs.readFileSync(atlasFile(), 'utf8')); } catch { atlasCache = { fetchedAt: 0, vendors: [] }; }
   }
-  if (Date.now() - atlasCache.fetchedAt > ATLAS_MAX_AGE) refreshAtlas();
+  if (atlasCache.v !== ATLAS_VERSION || Date.now() - atlasCache.fetchedAt > ATLAS_MAX_AGE) refreshAtlas();
   return atlasCache;
 }
 
@@ -270,7 +271,7 @@ async function refreshAtlas() {
     }));
     const vendors = atlasVendors.parseAtlasVendors(maps, markersByMap);
     if (!vendors.length) throw new Error('no vendors in the Atlas data');
-    atlasCache = { fetchedAt: Date.now(), vendors };
+    atlasCache = { v: ATLAS_VERSION, fetchedAt: Date.now(), vendors };
     fs.writeFileSync(atlasFile() + '.tmp', JSON.stringify(atlasCache));
     fs.renameSync(atlasFile() + '.tmp', atlasFile());
     if (win && !win.isDestroyed()) win.webContents.send('loot-updated');
@@ -328,7 +329,7 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
     const byId = new Map(allVendors().map((v) => [v.id, v]));
     const key = id || 'name:' + name;
     const override = vendorReports.overrideFor(state, key);
-    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
+    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', npc: !!v.npc, atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
     const out = [];
     const taken = new Set();
     const verdicts = vendorReports.verdictsForItem(state, name, id);
@@ -359,7 +360,7 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
 // Vendors to choose from, for "selling to" and the add-a-price form.
 ipcMain.handle('vendor-list', (event, zone) => {
   const d = loadVendorData();
-  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
+  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', npc: !!v.npc, atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
 });
 
 // Wiki item names for the item combobox (the panel adds the ones you have looted).

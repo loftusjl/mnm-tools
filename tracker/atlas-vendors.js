@@ -2,7 +2,8 @@
 // Vendors from the MnM Atlas (mnmatlas.com) — a community map whose pins include
 // ~200 vendors, many the wiki's Merchant pages don't cover yet. The Atlas publishes
 // plain JSON (data/maps.json and one markers file per map); this module turns those
-// into vendor entries and merges them into the wiki's list. Pure: fetching and caching
+// (vendors, plus its notable and quest NPCs, so any NPC can be picked as "who I'm
+// selling to") into vendor entries and merges them into the wiki's list. Pure: fetching and caching
 // live in main.js.
 //
 // Atlas pins say who and where, not what they buy: merged vendors keep the wiki's buy
@@ -13,14 +14,16 @@ const { vendorKey } = require('../renderer/vendor-markers');
 const { zoneKey } = require('./vendor-match');
 
 const ATLAS_URL = 'https://www.mnmatlas.com/';
+const NPC_KINDS = ['Vendor', 'Notable NPC', 'Quest NPC'];
 
 // maps: the Atlas's maps.json `maps` array; markersByMap: { <map id>: [marker, ...] }.
 function parseAtlasVendors(maps, markersByMap) {
   const out = [];
   for (const map of maps || []) {
     for (const m of (markersByMap && markersByMap[map.id]) || []) {
-      if (!m || m.category !== 'Vendor' || !m.name) continue;
+      if (!m || !NPC_KINDS.includes(m.category) || !m.name) continue;
       out.push({
+        npc: m.category !== 'Vendor',
         name: String(m.name).trim(), zone: map.title || map.id, location: String(m.note || '').trim(),
         atlasWiki: /^https?:\/\//.test(m.wiki || '') ? m.wiki : '',
         atlas: { map: map.id, place: m.id, wikiId: m.wikiId || '', level: m.level || '' },
@@ -59,7 +62,7 @@ function mergeAtlas(wikiVendors, atlasList) {
     const id = atlasId(a);
     if (seen.has(id)) continue;
     seen.add(id);
-    merged.push({ id, name: a.name, zone: a.zone, location: a.location, atlas: a.atlas, atlasWiki: a.atlasWiki, buys: [], source: 'atlas' });
+    merged.push({ id, name: a.name, zone: a.zone, location: a.location, atlas: a.atlas, atlasWiki: a.atlasWiki, npc: !!a.npc, buys: [], source: 'atlas' });
   }
   return merged;
 }

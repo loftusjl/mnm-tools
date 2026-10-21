@@ -36,6 +36,7 @@
   let zoneLabel = '';           // display name for the current zone
   let vendors = [];             // for the "selling to" picker
   let sources = null;           // where the vendor list comes from (wiki + Atlas)
+  let startAfterAdd = false;    // the add-vendor form was opened from the selling bar: start selling once it is saved
   let sellPick = '';            // vendor to preselect in the selling picker (e.g. one just added)
   let session = { active: null, recorded: 0 };
   let detail = null;            // last loot-vendors result for `selected`
@@ -315,24 +316,44 @@
       el('loot-sell-stop').addEventListener('click', async () => { session = await window.mapAPI.vendorSession({ action: 'end' }); renderSell(); refresh(); });
       return;
     }
-    const opt = (v) => '<option value="' + esc(v.id) + '">' + esc(v.name) + (v.inZone ? '' : ' — ' + esc(v.zone)) + '</option>';
+    // A combo box: type to filter every known vendor and NPC (wiki, Atlas, yours), pick one,
+    // or type a name nobody has listed and add it on the spot. Nearby ones come first.
     const here = vendors.filter((v) => v.inZone), elsewhere = vendors.filter((v) => !v.inZone);
-    box.innerHTML = '<label for="loot-sell-pick">Selling to</label><select id="loot-sell-pick"><option value="">Pick a vendor…</option><option value="' + NEW_VENDOR + '">＋ A vendor that isn\'t listed…</option>' +
-      (here.length ? '<optgroup label="Here' + (zoneLabel ? ' — ' + esc(zoneLabel) : '') + '">' + here.map(opt).join('') + '</optgroup>' : '') +
-      '<optgroup label="Elsewhere">' + elsewhere.map(opt).join('') + '</optgroup></select>' +
+    box.innerHTML = '<label for="loot-sell-pick">Selling to</label>' +
+      '<input id="loot-sell-pick" list="loot-sell-list" placeholder="Type a name, or pick one…" autocomplete="off">' +
+      '<datalist id="loot-sell-list">' + [...here, ...elsewhere].map((v) => '<option value="' + esc(vendorLabel(v)) + '">' + (v.npc ? 'NPC' : '') + '</option>').join('') + '</datalist>' +
       '<button id="loot-sell-go" class="secondary" disabled>Start</button>' +
-      '<span class="loot-meta">Pick the vendor you\'re standing at, then sell. Your sales are saved as confirmed prices for them.</span>';
+      '<span class="loot-meta">Type the name of who you\'re standing at, then sell. Your sales are saved as confirmed prices for them. Not listed? Type the name and add it.</span>';
     const pick = el('loot-sell-pick'), go = el('loot-sell-go');
-    if (sellPick && vendors.some((v) => v.id === sellPick)) { pick.value = sellPick; go.disabled = false; }
+    const sync = () => {
+      const text = pick.value.trim();
+      go.disabled = !text;
+      go.textContent = !text || resolveVendor(text) ? 'Start' : 'Add “' + (text.length > 28 ? text.slice(0, 27) + '…' : text) + '” and start';
+    };
+    if (sellPick) { const v = vendors.find((x) => x.id === sellPick); if (v) pick.value = vendorLabel(v); }
     sellPick = '';
-    pick.addEventListener('change', () => {
-      if (pick.value === NEW_VENDOR) { pick.value = ''; openForm(null, true); return; }
-      go.disabled = !pick.value;
-    });
+    sync();
+    pick.addEventListener('input', sync);
+    pick.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !go.disabled) go.click(); });
     go.addEventListener('click', async () => {
-      const r = await window.mapAPI.vendorSession({ action: 'start', vendorId: pick.value });
+      const text = pick.value.trim();
+      const v = resolveVendor(text);
+      if (!v) { startAfterAdd = true; return openForm(null, true, text.replace(/\s+—\s+.*$/, '')); }   // not listed: add it first
+      const r = await window.mapAPI.vendorSession({ action: 'start', vendorId: v.id });
       if (r && !r.error) { session = r; renderSell(); }
     });
+  }
+
+  // "Name — Zone" is what the combo shows and inserts, so same-named vendors in different
+  // zones ("A cook") can be told apart. A bare name also works when it is unambiguous.
+  const vendorLabel = (v) => v.name + ' — ' + v.zone;
+  function resolveVendor(text) {
+    const t = text.trim().toLowerCase();
+    if (!t) return null;
+    const exact = vendors.find((v) => vendorLabel(v).toLowerCase() === t);
+    if (exact) return exact;
+    const named = vendors.filter((v) => v.name.toLowerCase() === t);
+    return named.find((v) => v.inZone) || (named.length === 1 ? named[0] : null);
   }
 
   // ---- add a vendor price (item + vendor + price; vendor may be new) ----
@@ -369,7 +390,7 @@
       '<optgroup label="Elsewhere">' + elsewhere.map(opt).join('') + '</optgroup>';
   }
 
-  async function openForm(item, newVendor) {
+  async function openForm(item, newVendor, vendorName) {
     showErr('');
     await fillItemNames();
     el('lf-item').value = item ? item.name : '';
@@ -378,7 +399,7 @@
     ['lf-price', 'lf-vname', 'lf-vloc', 'lf-vwiki'].forEach((id) => { el(id).value = ''; });
     el('lf-vzone').value = zoneLabel || '';
     el('lf-newvendor').classList.add('hidden');
-    if (newVendor) { el('lf-vendor').value = NEW_VENDOR; el('lf-newvendor').classList.remove('hidden'); }
+    if (newVendor) { el('lf-vendor').value = NEW_VENDOR; el('lf-newvendor').classList.remove('hidden'); el('lf-vname').value = vendorName || ''; }
     el('loot-form-modal').classList.remove('hidden');
     showItemInfo();
     (newVendor ? el('lf-vname') : item ? el('lf-vendor') : el('lf-item')).focus();
@@ -400,7 +421,9 @@
       if (v.error) return showErr(v.error);
       vendorId = v.vendor.id;
       sellPick = vendorId;   // a vendor added from the selling bar is preselected there
+      if (startAfterAdd && wantsVendorOnly) await window.mapAPI.vendorSession({ action: 'start', vendorId });
     }
+    startAfterAdd = false;
     if (!wantsVendorOnly) {
       const known = items.find((i) => i.name.toLowerCase() === itemName.toLowerCase());
       const r = await window.mapAPI.reportAdd({ vendorId, itemName: known ? known.name : itemName, itemId: known ? known.id : '', unitPrice: price });
@@ -428,7 +451,7 @@
   el('loot-beta').addEventListener('change', refresh);
   el('loot-detail').addEventListener('click', onDetailClick);
   el('loot-add').addEventListener('click', () => openForm(selected));
-  el('lf-cancel').addEventListener('click', () => el('loot-form-modal').classList.add('hidden'));
+  el('lf-cancel').addEventListener('click', () => { startAfterAdd = false; el('loot-form-modal').classList.add('hidden'); });
   el('lf-save').addEventListener('click', saveForm);
   el('lf-item').addEventListener('change', showItemInfo);
   el('lf-vendor').addEventListener('change', () => el('lf-newvendor').classList.toggle('hidden', el('lf-vendor').value !== NEW_VENDOR));

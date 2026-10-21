@@ -717,6 +717,7 @@ body.overlay #map-area { background: rgba(var(--glass-rgb), 0.10); }
 #loot-modal .modal { width: 820px; height: 720px; max-height: 92vh; }
 .loot-sell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 8px; font-size: 12px; }
 .loot-sell select { max-width: 260px; }
+.loot-sell input { flex: 1 1 260px; max-width: 360px; }
 .loot-cols { flex: 1; min-height: 0; display: flex; gap: 12px; margin: 6px 0; }
 .loot-left { flex: 0 0 300px; display: flex; flex-direction: column; min-height: 0; gap: 6px; }
 .loot-left-head { display: flex; align-items: center; gap: 8px; }

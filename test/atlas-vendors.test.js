@@ -8,6 +8,9 @@ const markers = {
   underdocks: [
     { id: 'community-555', name: "Telar Nur'gta", category: 'Vendor', note: 'Dark Elf merchant, 2nd floor', level: 'lower', wiki: 'https://monstersandmemories.wiki/npcs/telar-nurgta', wikiId: 'npc-telar-nur-gta' },
     { id: 'x1', name: 'Anvil', category: 'Forge' },
+    { id: 'n1', name: 'Abbot Harrow', category: 'Notable NPC' },
+    { id: 'q1', name: 'Marshal Harding', category: 'Quest NPC' },
+    { id: 'm1', name: 'A giant rat', category: 'Named mob' },
     { id: 'wiki-bag-merchant', name: 'Bag merchant', category: 'Vendor', note: '' },
   ],
   'night-harbor': [{ id: 'c1', name: 'Chef Belle', category: 'Vendor', note: 'Market' }],
@@ -19,7 +22,8 @@ const wikiVendors = [
 
 test('only Vendor pins are taken, with zone from the map title and the Atlas wiki link', () => {
   const list = av.parseAtlasVendors(maps, markers);
-  assert.deepStrictEqual(list.map((v) => v.name), ["Telar Nur'gta", 'Bag merchant', 'Chef Belle']);
+  assert.deepStrictEqual(list.map((v) => v.name), ["Telar Nur'gta", 'Abbot Harrow', 'Marshal Harding', 'Bag merchant', 'Chef Belle']);
+  assert.deepStrictEqual(list.map((v) => v.npc), [false, true, true, false, false]);   // NPCs are pickable but are not vendors
   const t = list[0];
   assert.deepStrictEqual([t.zone, t.location, t.atlasWiki, t.atlas.wikiId, t.atlas.map], ['Underdocks', 'Dark Elf merchant, 2nd floor', 'https://monstersandmemories.wiki/npcs/telar-nurgta', 'npc-telar-nur-gta', 'underdocks']);
 });
@@ -47,7 +51,7 @@ test('a unique name matches across differently named zones; ids stay stable', ()
   assert.strictEqual(bag.length, 1);                         // wiki "A bag merchant" absorbed the Atlas pin
   assert.strictEqual(bag[0].id, wikiVendors[1].id);
   assert.strictEqual(bag[0].atlas.map, 'underdocks');
-  assert.strictEqual(merged.length, wikiVendors.length + 1);
+  assert.strictEqual(merged.length, wikiVendors.length + 3);   // Telar, Abbot Harrow, Marshal Harding
 });
 
 test('the Atlas link is used for merged and Atlas vendors; saved link still wins', () => {
