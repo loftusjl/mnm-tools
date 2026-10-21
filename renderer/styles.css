@@ -712,3 +712,31 @@ body.overlay #map-area { background: rgba(var(--glass-rgb), 0.10); }
 .replay-list li:last-child { border-bottom: none; }
 .rl-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-count { color: var(--muted); flex: 0 0 auto; }
+
+/* ---- Loot & Vendors ---- */
+#loot-modal .modal { width: 820px; height: 720px; max-height: 92vh; }
+.loot-sell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 8px; font-size: 12px; }
+.loot-sell select { max-width: 260px; }
+.loot-cols { flex: 1; min-height: 0; display: flex; gap: 12px; margin: 6px 0; }
+.loot-left { flex: 0 0 300px; display: flex; flex-direction: column; min-height: 0; gap: 6px; }
+.loot-left-head { display: flex; align-items: center; gap: 8px; }
+.loot-left-head input { flex: 1; min-width: 0; }
+.loot-list, .loot-detail { overflow-y: auto; min-height: 0; }
+.loot-list { flex: 1; border: 1px solid var(--line-2); border-radius: 8px; }
+.loot-detail { flex: 1; padding: 2px 4px 2px 2px; }
+.loot-detail h3 { margin: 0 0 2px; }
+.loot-row { display: flex; justify-content: space-between; gap: 8px; padding: 6px 9px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.loot-row:last-child { border-bottom: none; }
+.loot-row:hover { background: var(--surface-2); }
+.loot-row.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.loot-name { font-size: 12.5px; }
+.loot-meta { font-size: 11px; color: var(--muted); text-align: right; }
+.loot-detail .loot-meta { text-align: left; }
+.loot-ok { color: #5fbf6a; }
+.loot-filter { margin: 10px 0 6px; }
+.loot-buyer { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.loot-buyer .loot-meta { text-align: right; }
+.loot-badge { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 1px 6px; border-radius: 9px; border: 1px solid var(--line-2); color: var(--muted); white-space: nowrap; }
+.loot-b-confirmed { color: #5fbf6a; border-color: #5fbf6a; }
+.loot-b-exact { color: var(--accent); border-color: var(--accent); }
+.loot-foot { margin-top: 12px; }

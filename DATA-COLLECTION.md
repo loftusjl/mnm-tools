@@ -50,6 +50,22 @@ It then derives aggregate tallies — drop rates (items looted ÷ looted corpses
 vendor sell prices, harvest counts, coin per kill — keyed by item / mob /
 resource **name**.
 
+### The Loot & Vendors panel (reads nothing new)
+
+The **Loot & Vendors** panel is built from the same `act_13` (loot) and `act_24`
+(vendor sale) events above, from every character's ledger. From those events it
+also uses two fields that sit on them already: the **item id** (`d05`, which
+identifies the item type, not the player) and the **quantity** (`d01`). It adds no
+new file reads and no new event types.
+
+- It never writes to the game's files. Its one file, `vendor-reports.json`, lives
+  in the app's own data folder.
+- In **Selling to…** mode the player picks a vendor in the app; sales logged while
+  that vendor is selected are saved as "vendor X bought item Y for Z". The ledger
+  does not say which vendor bought an item, so the vendor is the player's own input.
+- Those reports carry a random per-install id. They never carry a character name.
+- Nothing from this panel is uploaded or published.
+
 ---
 
 ## What the app does NOT do

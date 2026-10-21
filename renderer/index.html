@@ -41,6 +41,7 @@
     <div class="section" data-overlay-hide>
       <button id="btn-overlay" class="btn-hero" title="Float the map on top of your game (Ctrl+Shift+M)">Enter Minimap Mode</button>
       <button id="btn-session-replay" class="btn-spotlight" title="Recap your recent play sessions from the game's Ledger — zones, kills, loot, harvests and coin">Session Recap</button>
+      <button id="btn-loot" class="btn-spotlight" title="Everything you've looted across all your characters, and which vendors will buy it">Loot &amp; Vendors</button>
     </div>
 
     <div class="section" data-overlay-hide>
@@ -274,6 +275,34 @@
     </div>
   </div>
 
+  <!-- Loot & Vendors -->
+  <div id="loot-modal" class="modal-backdrop hidden">
+    <div class="modal modal-wide">
+      <div class="replay-head">
+        <h2>Loot &amp; Vendors</h2>
+        <div class="replay-head-right">
+          <label class="follow-row" title="Also list loot from closed-beta characters"><input type="checkbox" id="loot-beta" /><span>Include beta</span></label>
+          <button id="loot-x" class="modal-x" title="Close" aria-label="Close">✕</button>
+        </div>
+      </div>
+      <div id="loot-sell" class="loot-sell"></div>
+      <div class="loot-cols">
+        <div class="loot-left">
+          <div class="loot-left-head">
+            <div class="replay-toggle">
+              <button id="loot-tab-items" class="rv-btn active">Items</button>
+              <button id="loot-tab-recent" class="rv-btn">Recent</button>
+            </div>
+            <input id="loot-search" type="search" placeholder="Search items…" />
+          </div>
+          <div id="loot-list" class="loot-list"></div>
+        </div>
+        <div id="loot-detail" class="loot-detail"></div>
+      </div>
+      <div class="btn-row right"><button id="loot-close" class="primary">Done</button></div>
+    </div>
+  </div>
+
   <!-- Marker detail popup -->
   <div id="marker-popup" class="hidden">
     <div id="popup-title"></div>
@@ -287,5 +316,6 @@
   </div>
 
   <script src="app.js"></script>
+  <script src="loot.js"></script>
 </body>
 </html>

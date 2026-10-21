@@ -2,6 +2,9 @@ const { app, BrowserWindow, ipcMain, dialog, globalShortcut, screen, crashReport
 const fs = require('fs');
 const path = require('path');
 const ledgerParser = require('./tracker/ledger-parser');
+const lootIndex = require('./tracker/loot-index');
+const vendorMatch = require('./tracker/vendor-match');
+const vendorReports = require('./tracker/vendor-reports');
 const { execFile } = require('child_process');
 
 let win;
@@ -203,6 +206,140 @@ ipcMain.handle('session-end', () => {
     return { ok: true };
   } catch (e) { return { error: e.message }; }
 });
+
+// ---- Loot & Vendors ----
+// A growing list of every distinct item looted (all characters), and for each one
+// the vendors who will buy it: confirmed reports first, then wiki category matches.
+// Vendor "sessions" let the player say who they're selling to; the ledger's own
+// sale events are then attributed to that vendor (see tracker/vendor-reports.js).
+const reportsFile = () => path.join(app.getPath('userData'), 'vendor-reports.json');
+let reportState = null; // loaded on first use, saved after every change
+const reports = () => (reportState = reportState || vendorReports.loadState(reportsFile()));
+const saveReports = () => vendorReports.saveState(reportsFile(), reports());
+
+// The wiki-derived data ships with the app. Cached: wiki.json is a few MB.
+let vendorData = null;
+function loadVendorData() {
+  if (vendorData) return vendorData;
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'mnmdb', f), 'utf8')); } catch { return {}; } };
+  const vendors = (read('vendors.json').vendors || []).map((v) => Object.assign({ id: vendorReports.vendorId(v) }, v));
+  let aliases = {};
+  try { aliases = JSON.parse(fs.readFileSync(path.join(__dirname, 'zone-aliases.json'), 'utf8')).zones || {}; } catch {}
+  vendorData = {
+    vendors,
+    byId: new Map(vendors.map((v) => [v.id, v])),
+    prepared: vendors.map(vendorMatch.prepareVendor),
+    wiki: read('wiki.json').items || {},
+    aliases,
+  };
+  return vendorData;
+}
+
+// Ledger files for the loot list: Early Access only unless the player asks for beta too.
+function lootFiles(includeBeta) {
+  const files = ledgerParser.findLedgerFiles();
+  return includeBeta ? files : files.filter((f) => ledgerParser.ledgerEra(f) === 'early-access');
+}
+
+// Attribute any new ledger sales to the vendor sessions. Returns how many reports were added.
+function attributeVendorSales() {
+  const state = reports();
+  if (!state.sessions.length) return 0;
+  const added = vendorReports.attributeSales(state, lootIndex.buildLootIndex(lootFiles(true), { recent: 0 }).sales);
+  if (added) saveReports();
+  return added;
+}
+
+ipcMain.handle('loot-list', (event, opts = {}) => {
+  try {
+    startLootWatch();
+    attributeVendorSales();
+    const idx = lootIndex.buildLootIndex(lootFiles(!!opts.includeBeta));
+    const reported = new Set(reports().reports.map((r) => vendorMatch.nameKey(r.itemName)));
+    const items = idx.items.map((i) => Object.assign(i, { reported: reported.has(vendorMatch.nameKey(i.name)) }));
+    return { items, recent: idx.recent, characters: idx.characters };
+  } catch (e) { return { error: e.message }; }
+});
+
+// Who buys one item. `zone` is the player's current game zone (internal code); each
+// result carries inZone so the panel can filter without asking again.
+ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
+  try {
+    const d = loadVendorData();
+    const confirmed = vendorReports.reportsForItem(reports(), name, id);
+    const out = [];
+    const taken = new Set();
+    for (const c of confirmed.sort((a, b) => b.ts - a.ts)) {
+      const v = d.byId.get(c.vendorId) || { name: c.vendorName, zone: c.zone };
+      taken.add(c.vendorId);
+      out.push({ vendorId: c.vendorId, name: v.name, zone: v.zone || '', location: v.location || '', how: 'confirmed', price: c.unitPrice, min: c.min, max: c.max, reports: c.count, ts: c.ts, inZone: vendorMatch.vendorInZone(v, zone, d.aliases) });
+    }
+    for (const m of vendorMatch.vendorsFor(name, d.wiki[name] || null, d.prepared)) {
+      if (taken.has(m.vendor.id)) continue; // a confirmed report replaces the guess
+      out.push({ vendorId: m.vendor.id, name: m.vendor.name, zone: m.vendor.zone || '', location: m.vendor.location || '', how: m.how, via: m.via, tag: m.tag ? vendorMatch.LABELS[m.tag] : '', inZone: vendorMatch.vendorInZone(m.vendor, zone, d.aliases) });
+    }
+    return { buyers: out, tags: [...vendorMatch.itemTags(name, d.wiki[name] || null)].map((t) => vendorMatch.LABELS[t]) };
+  } catch (e) { return { error: e.message }; }
+});
+
+// Vendors to choose from for "I'm selling to…".
+ipcMain.handle('vendor-list', (event, zone) => {
+  const d = loadVendorData();
+  return d.vendors.map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
+});
+
+ipcMain.handle('vendor-session', (event, { action, vendorId } = {}) => {
+  try {
+    const state = reports();
+    if (action === 'start') {
+      const v = loadVendorData().byId.get(vendorId);
+      if (!v) return { error: 'Unknown vendor.' };
+      vendorReports.startSession(state, v, Date.now());
+      saveReports();
+      startLootWatch();
+    } else if (action === 'end') {
+      attributeVendorSales(); // pick up sales the ledger has already flushed
+      vendorReports.endSession(state, Date.now());
+      saveReports();
+    } else {
+      attributeVendorSales();
+    }
+    const s = vendorReports.openSession(state);
+    return {
+      active: s ? { vendorId: s.vendorId, vendorName: s.vendorName, zone: s.zone, from: s.from } : null,
+      recorded: s ? state.reports.filter((r) => r.ts >= s.from && r.vendorId === s.vendorId).length : 0,
+    };
+  } catch (e) { return { error: e.message }; }
+});
+
+// Zoning means you've walked away from the vendor: stop attributing sales to them.
+function endVendorSessionOnZone() {
+  const state = reports();
+  if (!vendorReports.openSession(state)) return;
+  attributeVendorSales();
+  vendorReports.endSession(state, Date.now());
+  saveReports();
+}
+
+// Its own small ledger watcher (independent of the Drop Tracker opt-in): it only
+// feeds the Loot panel, and only attributes sales while a vendor session is open.
+let lootWatcher = null;
+let lootWatchTimer = null;
+function startLootWatch() {
+  if (lootWatcher || !fs.existsSync(ledgerParser.GAME_BASE)) return;
+  try {
+    lootWatcher = fs.watch(ledgerParser.GAME_BASE, { recursive: true }, (event, filename) => {
+      if (!filename || !/_Character_/i.test(String(filename))) return;
+      clearTimeout(lootWatchTimer);
+      lootWatchTimer = setTimeout(() => {
+        try {
+          attributeVendorSales();
+          if (win && !win.isDestroyed()) win.webContents.send('loot-updated');
+        } catch {}
+      }, 2000);
+    });
+  } catch {}
+}
 
 // Auto-rescan: watch the game folder and re-parse a few seconds after the game
 // writes a ledger file, so the app's data stays current with no manual step.
@@ -638,6 +775,7 @@ function startGameLogWatch() {
       const matches = [...buf.toString('utf8').matchAll(/Start zoning process to (\S+)/g)];
       if (matches.length) {
         lastGameZone = matches[matches.length - 1][1];
+        try { endVendorSessionOnZone(); } catch {}
         if (win && !win.isDestroyed()) win.webContents.send('game-zone', lastGameZone);
       }
     } catch {
