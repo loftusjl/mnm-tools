@@ -46,12 +46,27 @@
     showPill(() => hooks.cancelPlacement(true));
   }
 
+  // The Atlas is its own map: show the vendor there (the Atlas finds it by wiki id or name).
+  async function showOnAtlas(v) {
+    closePanel();
+    showPill(() => {});
+    const r = await hooks.showOnAtlas({ zoneName: v.zone, mapId: v.atlas.map, wikiId: v.atlas.wikiId, name: v.name });
+    if (r && r.error) { hidePill(); reopen(); }
+  }
+
+  window.lootMenu.add((v) => {
+    if (!v.atlas) return null;
+    return hooks.hasZone(v.zone)
+      ? { html: 'Show on Atlas map', run: () => showOnAtlas(v) }
+      : { disabled: true, html: '<span title="Add or import a map for this zone first">No ' + esc(v.zone) + ' map in the app</span>' };
+  });
+
   window.lootMenu.add(async (v) => {
     if (!v.zone) return { disabled: true, html: '<span>No zone known for this vendor</span>' };
     const found = await hooks.findVendorMarkers(v.name, v.zone);
     if (!found.zone) return { disabled: true, html: '<span title="Add or import a map for this zone first">No map for ' + esc(v.zone) + ' yet</span>' };
     return found.markers.length
-      ? { html: 'Highlight on map', run: () => highlight(v, found) }
-      : { html: 'Place on map', run: () => place(v) };
+      ? { html: 'Highlight on my map', run: () => highlight(v, found) }
+      : { html: 'Place on my map', run: () => place(v) };
   });
 })();

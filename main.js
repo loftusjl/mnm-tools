@@ -4,6 +4,8 @@ const path = require('path');
 const ledgerParser = require('./tracker/ledger-parser');
 const lootIndex = require('./tracker/loot-index');
 const vendorMatch = require('./tracker/vendor-match');
+const atlasVendors = require('./tracker/atlas-vendors');
+const { vendorKey } = require('./renderer/vendor-markers');
 const vendorReports = require('./tracker/vendor-reports');
 const { execFile } = require('child_process');
 
@@ -235,8 +237,53 @@ function loadVendorData() {
   return vendorData;
 }
 
-// The wiki's vendors with the player's overlays, plus vendors only the player knows.
-const allVendors = () => vendorReports.mergeVendors(loadVendorData().vendors, reports());
+// ---- Vendors from the MnM Atlas ----
+// The Atlas (mnmatlas.com) pins ~200 vendors, many the wiki's Merchant pages do not
+// list yet. Its public JSON is downloaded read-only (nothing about the player is sent),
+// cached in the app's data folder and refreshed daily; offline, the cache is used.
+const atlasFile = () => path.join(app.getPath('userData'), 'atlas-vendors.json');
+const ATLAS_MAX_AGE = 24 * 3600 * 1000;
+let atlasCache = null;   // { fetchedAt, vendors }
+let atlasFetching = false;
+
+function atlasData() {
+  if (!atlasCache) {
+    try { atlasCache = JSON.parse(fs.readFileSync(atlasFile(), 'utf8')); } catch { atlasCache = { fetchedAt: 0, vendors: [] }; }
+  }
+  if (Date.now() - atlasCache.fetchedAt > ATLAS_MAX_AGE) refreshAtlas();
+  return atlasCache;
+}
+
+async function refreshAtlas() {
+  if (atlasFetching) return;
+  atlasFetching = true;
+  try {
+    const get = async (rel) => {
+      const r = await fetch(atlasVendors.ATLAS_URL + rel + '?t=' + Date.now(), { signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error(rel + ' ' + r.status);
+      return r.json();
+    };
+    const maps = (await get('data/maps.json')).maps || [];
+    const markersByMap = {};
+    await Promise.all(maps.filter((m) => m.markersFile).map(async (m) => {
+      try { const j = await get(m.markersFile); markersByMap[m.id] = Array.isArray(j) ? j : (j.markers || []); } catch {}
+    }));
+    const vendors = atlasVendors.parseAtlasVendors(maps, markersByMap);
+    if (!vendors.length) throw new Error('no vendors in the Atlas data');
+    atlasCache = { fetchedAt: Date.now(), vendors };
+    fs.writeFileSync(atlasFile() + '.tmp', JSON.stringify(atlasCache));
+    fs.renameSync(atlasFile() + '.tmp', atlasFile());
+    if (win && !win.isDestroyed()) win.webContents.send('loot-updated');
+  } catch {
+    // offline or the site changed: keep whatever is cached and try again next time
+    if (atlasCache) atlasCache.fetchedAt = Math.max(atlasCache.fetchedAt, Date.now() - ATLAS_MAX_AGE + 3600 * 1000);
+  } finally { atlasFetching = false; }
+}
+
+// The wiki's vendors, merged with the Atlas's, with the player's overlays, plus vendors
+// only the player knows.
+const allVendors = () => vendorReports.mergeVendors(atlasVendors.mergeAtlas(loadVendorData().vendors, atlasData().vendors), reports());
+ipcMain.handle('vendor-sources', () => { const a = atlasData(); return { atlasCount: a.vendors.length, atlasAt: a.fetchedAt }; });
 
 // Ledger files for the loot list: Early Access only unless the player asks for beta too.
 function lootFiles(includeBeta) {
@@ -281,7 +328,7 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
     const byId = new Map(allVendors().map((v) => [v.id, v]));
     const key = id || 'name:' + name;
     const override = vendorReports.overrideFor(state, key);
-    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
+    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
     const out = [];
     const taken = new Set();
     const verdicts = vendorReports.verdictsForItem(state, name, id);
@@ -312,7 +359,7 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
 // Vendors to choose from, for "selling to" and the add-a-price form.
 ipcMain.handle('vendor-list', (event, zone) => {
   const d = loadVendorData();
-  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
+  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
 });
 
 // Wiki item names for the item combobox (the panel adds the ones you have looted).
@@ -324,6 +371,9 @@ const mutate = (fn) => (event, arg) => {
   try { const out = fn(reports(), arg || {}); saveReports(); return Object.assign({ ok: true }, out); } catch (e) { return { error: e.message }; }
 };
 ipcMain.handle('vendor-add', mutate((state, v) => {
+  const k = vendorMatch.zoneKey(v.zone) + '|' + vendorKey(v.name);
+  const known = allVendors().find((x) => x.source === 'atlas' && vendorMatch.zoneKey(x.zone) + '|' + vendorKey(x.name) === k);
+  if (known && !String(v.wikiUrl || '').trim()) return { vendor: { id: known.id, name: known.name, zone: known.zone }, overlay: true, existing: true };
   const r = vendorReports.addVendor(state, v, loadVendorData().wikiIds, Date.now());
   return { vendor: r.vendor, overlay: r.overlay };
 }));

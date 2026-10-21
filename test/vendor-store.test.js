@@ -236,3 +236,14 @@ test('your saved link wins; local vendors without one get a wiki search', () => 
 test('every wiki vendor gets a page link', () => {
   for (const v of wikiVendors) assert.match(store.wikiLink(v).url, /\/wiki\/[A-Z]/);
 });
+
+test('selling to a local or Atlas vendor records reports under that vendor\'s own id', () => {
+  const state = store.newState();
+  const { vendor } = store.addVendor(state, { name: 'Alric', zone: 'Night Harbor' }, wikiIds, 1);
+  store.startSession(state, Object.assign({}, vendor), 10);
+  store.attributeSales(state, [{ t: 20, character: 'Anm', evKey: 'k1', name: 'Rat Tooth', id: '', qty: 1, unit: 6 }]);
+  assert.strictEqual(state.reports[0].vendorId, vendor.id);
+  assert.match(vendor.id, /^local:/);
+  const atlas = { id: 'atlas:underdocks:telar nur gta', name: "Telar Nur'gta", zone: 'Underdocks' };
+  assert.strictEqual(store.startSession(state, atlas, 30).vendorId, atlas.id);
+});

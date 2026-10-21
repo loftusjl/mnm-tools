@@ -59,7 +59,7 @@ function endSession(state, now) {
 // Begin selling to `vendor`. Any session already open is closed first.
 function startSession(state, vendor, now) {
   endSession(state, now);
-  const s = { id: crypto.randomUUID(), vendorId: vendorId(vendor), vendorName: vendor.name, zone: vendor.zone || '', from: now, to: null };
+  const s = { id: crypto.randomUUID(), vendorId: vendor.id || vendorId(vendor), vendorName: vendor.name, zone: vendor.zone || '', from: now, to: null };
   state.sessions.push(s);
   return s;
 }
@@ -215,15 +215,17 @@ function cleanWikiUrl(url) {
   return u.href;
 }
 
-// Where to read about a vendor. A link the player saved wins; a wiki vendor's page is
+// Where to read about a vendor. A link the player saved wins, then the Atlas's own link;
+// a wiki vendor's page is
 // named after the vendor (the vendor list already carries disambiguators such as
 // "A fisherman (Faelindral)"); a vendor only the player knows falls back to a wiki
 // search. Returns { url, kind: 'saved' | 'page' | 'search' }.
 const WIKI_BASE = 'https://monstersandmemories.miraheze.org/';
 function wikiLink(vendor) {
   if (vendor.wikiUrl) return { url: vendor.wikiUrl, kind: 'saved' };
+  if (vendor.atlasWiki) return { url: vendor.atlasWiki, kind: 'page' };
   const name = String(vendor.name || '').trim();
-  if (vendor.source === 'local' || !name) {
+  if (vendor.source === 'local' || vendor.source === 'atlas' || !name) {
     return { url: WIKI_BASE + 'w/index.php?title=Special:Search&go=Go&search=' + encodeURIComponent(name), kind: 'search' };
   }
   const title = (name[0].toUpperCase() + name.slice(1)).replace(/ /g, '_');

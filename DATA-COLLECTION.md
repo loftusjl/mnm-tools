@@ -68,6 +68,10 @@ new file reads and no new event types.
   note, and a corrected category for an
   item. These are the player's own entries, stored in the same local file. Edits
   and deletes are kept as revisions in that file.
+- The vendor list also includes the vendors pinned on the MnM Atlas. The app
+  downloads the Atlas's public data files (`maps.json` and each map's `markers.json`
+  from mnmatlas.com) at most once a day and keeps a copy in its own data folder.
+  Nothing about the player is sent with those requests.
 - Those reports carry a random per-install id. They never carry a character name.
 - Nothing from this panel is uploaded or published.
 

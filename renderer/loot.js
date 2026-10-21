@@ -35,6 +35,8 @@
   let currentZone = '';         // the game's internal zone code
   let zoneLabel = '';           // display name for the current zone
   let vendors = [];             // for the "selling to" picker
+  let sources = null;           // where the vendor list comes from (wiki + Atlas)
+  let sellPick = '';            // vendor to preselect in the selling picker (e.g. one just added)
   let session = { active: null, recorded: 0 };
   let detail = null;            // last loot-vendors result for `selected`
   let editingTags = false;      // the category editor is open
@@ -57,6 +59,7 @@
     vendors = (await window.mapAPI.vendorList(currentZone)) || [];
     const here = vendors.find((v) => v.inZone);
     zoneLabel = currentZone ? (here ? here.zone : currentZone) : '';
+    sources = await window.mapAPI.vendorSources();
     session = (await window.mapAPI.vendorSession({ action: 'status' })) || session;
     renderSell();
   }
@@ -111,7 +114,8 @@
     // Only guesses can be wrong about a vendor; a confirmed price is the player's own evidence.
     const no = b.how === 'confirmed' ? '' : ' <button class="linklike loot-no" data-act="refuse" data-vid="' + esc(b.vendorId) + '" title="Hide this guess: this vendor does not buy it">✕ doesn\'t buy</button>';
     return '<div class="loot-buyer"><div><span class="loot-badge ' + cls + '">' + esc(label) + '</span> ' + vendorName(b) +
-      (b.local ? ' <span class="loot-badge" title="A vendor you added">yours</span>' : '') + wiki + no + '</div>' +
+      (b.local ? ' <span class="loot-badge" title="A vendor you added">yours</span>' : '') +
+      (b.fromAtlas ? ' <span class="loot-badge" title="Listed on the MnM Atlas; the wiki has no buy list for them, so prices come from your reports">Atlas</span>' : '') + wiki + no + '</div>' +
       '<div class="loot-meta">' + (note ? note + '<br>' : '') + esc(b.location || b.zone) + '</div></div>';
   }
 
@@ -156,7 +160,8 @@
           (b.was ? ' · you had a price of ' + esc(coin(b.was)) : '') + (b.mine ? ' · <button class="linklike" data-act="undo-refuse" data-id="' + esc(b.reportId) + '">Undo</button>' : '') + '</div></div>').join('') + '</details>';
       }
       if (detail.mine && detail.mine.length) html += '<div class="replay-col-title">Your reports</div>' + detail.mine.map(myReportHtml).join('');
-      html += '<div class="loot-meta loot-foot">“Likely” means the wiki says this vendor buys that kind of item.</div>';
+      html += '<div class="loot-meta loot-foot">“Likely” means the wiki says this vendor buys that kind of item. Vendors come from the wiki\'s Merchant pages' +
+        (sources && sources.atlasCount ? ' and ' + sources.atlasCount + ' pins on the MnM Atlas (updated ' + esc(new Date(sources.atlasAt).toLocaleDateString()) + ')' : '') + '.</div>';
     }
     box.innerHTML = html;
   }
@@ -312,13 +317,18 @@
     }
     const opt = (v) => '<option value="' + esc(v.id) + '">' + esc(v.name) + (v.inZone ? '' : ' — ' + esc(v.zone)) + '</option>';
     const here = vendors.filter((v) => v.inZone), elsewhere = vendors.filter((v) => !v.inZone);
-    box.innerHTML = '<label for="loot-sell-pick">Selling to</label><select id="loot-sell-pick"><option value="">Pick a vendor…</option>' +
+    box.innerHTML = '<label for="loot-sell-pick">Selling to</label><select id="loot-sell-pick"><option value="">Pick a vendor…</option><option value="' + NEW_VENDOR + '">＋ A vendor that isn\'t listed…</option>' +
       (here.length ? '<optgroup label="Here' + (zoneLabel ? ' — ' + esc(zoneLabel) : '') + '">' + here.map(opt).join('') + '</optgroup>' : '') +
       '<optgroup label="Elsewhere">' + elsewhere.map(opt).join('') + '</optgroup></select>' +
       '<button id="loot-sell-go" class="secondary" disabled>Start</button>' +
       '<span class="loot-meta">Pick the vendor you\'re standing at, then sell. Your sales are saved as confirmed prices for them.</span>';
     const pick = el('loot-sell-pick'), go = el('loot-sell-go');
-    pick.addEventListener('change', () => { go.disabled = !pick.value; });
+    if (sellPick && vendors.some((v) => v.id === sellPick)) { pick.value = sellPick; go.disabled = false; }
+    sellPick = '';
+    pick.addEventListener('change', () => {
+      if (pick.value === NEW_VENDOR) { pick.value = ''; openForm(null, true); return; }
+      go.disabled = !pick.value;
+    });
     go.addEventListener('click', async () => {
       const r = await window.mapAPI.vendorSession({ action: 'start', vendorId: pick.value });
       if (r && !r.error) { session = r; renderSell(); }
@@ -359,7 +369,7 @@
       '<optgroup label="Elsewhere">' + elsewhere.map(opt).join('') + '</optgroup>';
   }
 
-  async function openForm(item) {
+  async function openForm(item, newVendor) {
     showErr('');
     await fillItemNames();
     el('lf-item').value = item ? item.name : '';
@@ -368,9 +378,10 @@
     ['lf-price', 'lf-vname', 'lf-vloc', 'lf-vwiki'].forEach((id) => { el(id).value = ''; });
     el('lf-vzone').value = zoneLabel || '';
     el('lf-newvendor').classList.add('hidden');
+    if (newVendor) { el('lf-vendor').value = NEW_VENDOR; el('lf-newvendor').classList.remove('hidden'); }
     el('loot-form-modal').classList.remove('hidden');
     showItemInfo();
-    (item ? el('lf-vendor') : el('lf-item')).focus();
+    (newVendor ? el('lf-vname') : item ? el('lf-vendor') : el('lf-item')).focus();
   }
 
   async function saveForm() {
@@ -388,6 +399,7 @@
       const v = await window.mapAPI.vendorAdd({ name: fv('lf-vname'), zone: fv('lf-vzone'), location: fv('lf-vloc'), wikiUrl: fv('lf-vwiki') });
       if (v.error) return showErr(v.error);
       vendorId = v.vendor.id;
+      sellPick = vendorId;   // a vendor added from the selling bar is preselected there
     }
     if (!wantsVendorOnly) {
       const known = items.find((i) => i.name.toLowerCase() === itemName.toLowerCase());

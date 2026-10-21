@@ -2511,7 +2511,24 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && placement && !moveState) cancelPlacement();
 });
 
-window.mapHooks = { findVendorMarkers, showMarkers, stopHighlight, startPlacement, cancelPlacement };
+// Show a vendor on the Atlas: the Atlas looks a place up by ?wiki=<id> (or ?find=<name>).
+function showOnAtlas({ zoneName, mapId, wikiId, name }) {
+  const zone = zoneByName(zoneName);
+  if (!zone) return { error: 'There is no map for ' + zoneName + ' yet.' };
+  cancelMove();
+  cancelPlacement(true);
+  stopHighlight();
+  if (zone.id !== currentZoneId) switchZone(zone.id);
+  setMapSource('atlas');
+  const id = atlasIdFor(currentZone());
+  if (!id) return { error: 'The Atlas has no map for ' + zone.name + '.' };
+  const src = ATLAS_URL + (mapId || id) + '/?embed=1&' + (wikiId ? 'wiki=' + encodeURIComponent(wikiId) : 'find=' + encodeURIComponent(name));
+  $('atlas-view').src = src;
+  atlasShownId = src;   // applyMapSource puts the plain map back on the next zone change
+  return { ok: true };
+}
+
+window.mapHooks = { findVendorMarkers, showMarkers, stopHighlight, startPlacement, cancelPlacement, showOnAtlas, hasZone: (name) => !!zoneByName(name) };
 
 (async function init() {
   if (isOverlay) document.body.classList.add('overlay');

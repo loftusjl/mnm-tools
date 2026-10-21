@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('mapAPI', {
   lootList: (opts) => ipcRenderer.invoke('loot-list', opts),
   lootVendors: (item) => ipcRenderer.invoke('loot-vendors', item),
   vendorList: (zone) => ipcRenderer.invoke('vendor-list', zone),
+  vendorSources: () => ipcRenderer.invoke('vendor-sources'),
   vendorSession: (req) => ipcRenderer.invoke('vendor-session', req),
   itemNames: () => ipcRenderer.invoke('item-names'),
   vendorAdd: (v) => ipcRenderer.invoke('vendor-add', v),
