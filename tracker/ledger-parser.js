@@ -643,4 +643,5 @@ module.exports = {
   findLedgerFiles, parseLedgers, buildItemReport, buildDataset, ledgerServer, ledgerEra,
   buildSessions, todayRollup, SESSION_GAP_MS,
   charactersFromFiles, mergeAggs,
+  decodeName, cleanItemName, isClean, zoneName,
 };
