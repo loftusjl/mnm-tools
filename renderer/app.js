@@ -33,6 +33,7 @@ let mapImage = null;                           // loaded Image for current zone
 let editingMarkerId = null;                    // marker being edited in the modal
 let pendingWorldPos = null;                    // where a new marker will be placed
 let popupMarkerId = null;
+let popupMarker = null;                        // the marker the popup shows (for Move)
 let popupIsCommunity = false;                  // the open popup is a read-only community marker
 let communityMarkers = [];                     // approved community submissions from mnm-db.com (read-only)
 let showCommunity = false;                     // overlay them on the map?
@@ -148,6 +149,16 @@ function toScreen(wx, wy) {
 }
 function toWorld(sx, sy) {
   return { x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale };
+}
+
+// Where a community marker is drawn and hit-tested, in world (map image) pixels. The
+// community's coordinates are never changed: a marker you moved is a local override in
+// data.communityMoves, so a refresh from the site keeps your placement.
+const communityKey = (m) => (m.id != null ? String(m.id) : [m.zone, m.label, m.x, m.y].join('|'));
+function communityWorld(m, sc) {
+  if (moveState && moveState.community === communityKey(m)) return { x: moveState.x, y: moveState.y };
+  const o = data.communityMoves && data.communityMoves[communityKey(m)];
+  return o ? { x: o.x, y: o.y } : { x: m.x / sc, y: m.y / sc };
 }
 
 // Community markers are stored in WEB-image pixels (the downscaled map the site shows).
@@ -269,8 +280,9 @@ function draw() {
   // Markers (drawn in screen space so they stay the same size at any zoom)
   for (const m of zone.markers) {
     if (hiddenCategories.has(m.category)) continue;
-    const p = toScreen(m.x, m.y);
+    const p = moveState && moveState.id === m.id ? toScreen(moveState.x, moveState.y) : toScreen(m.x, m.y);
     drawMarkerBody(p, m, zone.name, 'own');
+    if (moveState && moveState.id === m.id) drawMoveRing(p);
 
     if (view.scale > 0.6 && m.label) {
       ctx.font = '11px "Segoe UI", sans-serif';
@@ -289,7 +301,8 @@ function draw() {
     ctx.save();
     for (const m of communityMarkers) {
       if (m.zone !== zone.name || (m.map_id || 'official') !== 'official' || hiddenCategories.has(m.category)) continue;
-      const p = toScreen(m.x / sc, m.y / sc);
+      const cw = communityWorld(m, sc);
+      const p = toScreen(cw.x, cw.y);
       drawMarkerBody(p, m, m.zone, 'community');
 
       if (view.scale > 0.6 && m.label) {
@@ -303,6 +316,8 @@ function draw() {
     }
     ctx.restore();
   }
+  // A community marker being moved gets the same ring
+  if (moveState && moveState.community) { const cp = toScreen(moveState.x, moveState.y); drawMoveRing(cp); }
   if (atlasAlign) drawAlignPairs();
 }
 
@@ -359,6 +374,7 @@ function loadZoneImage(zone, thenFit) {
 function switchZone(zoneId, fit = true) {
   currentZoneId = zoneId;
   const zone = currentZone();
+  cancelMove();
   hidePopup();
   loadZoneImage(zone, fit);
   if (fit) fitView();
@@ -476,6 +492,7 @@ let dragMoved = false;
 let last = { x: 0, y: 0 };
 
 canvas.addEventListener('mousedown', (e) => {
+  if (grabMove(e)) return; // the marker being moved takes the drag; everything else still pans
   dragging = true;
   dragMoved = false;
   last = { x: e.clientX, y: e.clientY };
@@ -483,6 +500,7 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 window.addEventListener('mousemove', (e) => {
+  if (dragMove) { dragMoveTo(e); return; }
   if (!dragging) return;
   const dx = e.clientX - last.x;
   const dy = e.clientY - last.y;
@@ -494,6 +512,7 @@ window.addEventListener('mousemove', (e) => {
 });
 
 window.addEventListener('mouseup', () => {
+  if (dragMove) { dragMove = false; canvas.classList.remove('dragging'); return; }
   dragging = false;
   canvas.classList.remove('dragging');
 });
@@ -537,7 +556,8 @@ function markerAt(sx, sy) {
     for (let i = communityMarkers.length - 1; i >= 0; i--) {
       const m = communityMarkers[i];
       if (m.zone !== zone.name || (m.map_id || 'official') !== 'official' || hiddenCategories.has(m.category)) continue;
-      const p = toScreen(m.x / sc, m.y / sc);
+      const cw = communityWorld(m, sc);
+      const p = toScreen(cw.x, cw.y);
       if (Math.hypot(p.x - sx, p.y - sy) <= MARKER_RADIUS + 3) return { ...m, _community: true };
     }
   }
@@ -546,6 +566,7 @@ function markerAt(sx, sy) {
 
 canvas.addEventListener('click', (e) => {
   if (dragMoved) return; // it was a pan, not a click
+  if (moveState) return; // moving a marker: clicks on the map do nothing until Save / Cancel
   const rect = canvas.getBoundingClientRect();
 
   // Aligning with the Atlas: a click marks where the chosen landmark sits on this map
@@ -586,7 +607,7 @@ canvas.addEventListener('click', (e) => {
 
 canvas.addEventListener('dblclick', (e) => {
   const zone = currentZone();
-  if (!zone || quickPlace || atlasAlign) return;
+  if (!zone || quickPlace || atlasAlign || moveState) return;
   const rect = canvas.getBoundingClientRect();
   const m = markerAt(e.clientX - rect.left, e.clientY - rect.top);
   if (m) return; // double-clicked an existing marker; the click handler opened it
@@ -804,6 +825,120 @@ $('marker-save').addEventListener('click', () => {
 
 $('marker-cancel').addEventListener('click', closeMarkerModal);
 
+// ---- Moving markers ----
+// Markers are locked (a drag pans the map). "Move" in a marker's popup unlocks that one
+// marker: drag it, then Save (Enter) or Cancel (Esc). Your own markers change position;
+// a community marker only gets a local override you can reset.
+let moveState = null;   // { x, y, orig, id | community, label, onSave, onCancel, reset }
+let dragMove = false;
+
+function startMove(opts) {
+  cancelMove();
+  hidePopup();
+  moveState = Object.assign({ orig: { x: opts.x, y: opts.y } }, opts);
+  $('move-label').textContent = opts.label;
+  $('move-reset').classList.toggle('hidden', !opts.reset);
+  $('move-bar').classList.remove('hidden');
+  draw();
+}
+
+function endMove() {
+  moveState = null;
+  dragMove = false;
+  $('move-bar').classList.add('hidden');
+  canvas.classList.remove('dragging');
+  draw();
+}
+
+function cancelMove() {
+  if (!moveState) return;
+  const s = moveState;
+  endMove();
+  if (s.onCancel) s.onCancel();
+}
+
+function saveMove() {
+  if (!moveState) return;
+  const s = moveState;
+  endMove();
+  s.onSave(s.x, s.y);
+}
+
+function resetMove() {
+  if (!moveState || !moveState.reset) return;
+  const s = moveState;
+  endMove();
+  s.reset();
+}
+
+function moveHit(e) {
+  const rect = canvas.getBoundingClientRect();
+  const p = toScreen(moveState.x, moveState.y);
+  return Math.hypot(p.x - (e.clientX - rect.left), p.y - (e.clientY - rect.top)) <= MARKER_RADIUS + 6;
+}
+
+function grabMove(e) {
+  if (!moveState || !moveHit(e)) return false;
+  dragMove = true;
+  dragMoved = true; // the click that follows the drag is not a click on the map
+  canvas.classList.add('dragging');
+  return true;
+}
+
+function dragMoveTo(e) {
+  const rect = canvas.getBoundingClientRect();
+  const w = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+  const maxX = mapImage ? mapImage.width : GRID_SIZE, maxY = mapImage ? mapImage.height : GRID_SIZE;
+  moveState.x = Math.max(0, Math.min(maxX, w.x));
+  moveState.y = Math.max(0, Math.min(maxY, w.y));
+  draw();
+}
+
+function drawMoveRing(p) {
+  ctx.save();
+  ctx.strokeStyle = '#ffd34d';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, MARKER_RADIUS + 7, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+$('move-save').addEventListener('click', saveMove);
+$('move-cancel').addEventListener('click', cancelMove);
+$('move-reset').addEventListener('click', resetMove);
+window.addEventListener('keydown', (e) => {
+  if (!moveState || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || ''))) return;
+  if (e.key === 'Escape') { e.preventDefault(); cancelMove(); }
+  else if (e.key === 'Enter') { e.preventDefault(); saveMove(); }
+});
+
+// "Move" for the marker in the popup (own or community).
+function moveMarker(marker) {
+  const zone = currentZone();
+  if (!zone) return;
+  if (marker._community) {
+    const sc = siteScale(zone.name) || 1;
+    const w = communityWorld(marker, sc);
+    const key = communityKey(marker);
+    const moved = !!(data.communityMoves && data.communityMoves[key]);
+    startMove({
+      label: marker.label + ' (community marker: your own placement, only on this machine)',
+      x: w.x, y: w.y, community: key,
+      onSave: (x, y) => { (data.communityMoves = data.communityMoves || {})[key] = { x, y }; save(); draw(); },
+      reset: moved ? () => { delete data.communityMoves[key]; save(); draw(); } : null,
+    });
+    return;
+  }
+  const m = zone.markers.find((x) => x.id === marker.id);
+  if (!m) return;
+  startMove({
+    label: m.label, x: m.x, y: m.y, id: m.id,
+    onSave: (x, y) => { m.x = x; m.y = y; save(); draw(); },
+  });
+}
+
 // ---- Marker popup ----
 
 function showPopup(marker, pageX, pageY) {
@@ -818,6 +953,8 @@ function showPopup(marker, pageX, pageY) {
   // Community markers are read-only — only your own get Edit / Delete.
   $('popup-edit').classList.toggle('hidden', popupIsCommunity);
   $('popup-delete').classList.toggle('hidden', popupIsCommunity);
+  popupMarker = marker;
+  if (popupIsCommunity && data.communityMoves && data.communityMoves[communityKey(marker)]) $('popup-notes').textContent += ' · moved by you';
 
   const popup = $('marker-popup');
   popup.classList.remove('hidden');
@@ -834,6 +971,7 @@ function hidePopup() {
 }
 
 $('popup-close').addEventListener('click', hidePopup);
+$('popup-move').addEventListener('click', () => { const m = popupMarker; if (m) moveMarker(m); });
 
 $('popup-delete').addEventListener('click', () => {
   if (popupIsCommunity) return; // read-only

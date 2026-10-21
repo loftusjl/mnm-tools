@@ -764,3 +764,6 @@ button.linklike:hover { text-decoration: underline; }
 .loot-no { opacity: .55; white-space: nowrap; font-size: 12px; }
 .loot-no:hover { opacity: 1; }
 .loot-wiki { white-space: nowrap; }
+
+#move-bar { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 9000; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(var(--glass-rgb), 0.96); border: 1px solid #ffd34d; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.5); max-width: 90vw; }
+#move-bar.hidden { display: none; }

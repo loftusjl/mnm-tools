@@ -331,6 +331,14 @@
     </div>
   </div>
 
+  <!-- Shown while a marker is unlocked for dragging -->
+  <div id="move-bar" class="hidden">
+    <span>Drag <b id="move-label"></b> to its new spot</span>
+    <button id="move-reset" class="secondary hidden" title="Put it back where the community has it">Reset</button>
+    <button id="move-cancel" class="secondary">Cancel</button>
+    <button id="move-save" class="primary">Save</button>
+  </div>
+
   <!-- Marker detail popup -->
   <div id="marker-popup" class="hidden">
     <div id="popup-title"></div>
@@ -338,6 +346,7 @@
     <div id="popup-notes"></div>
     <div class="btn-row right">
       <button id="popup-delete" class="danger">Delete</button>
+      <button id="popup-move" class="secondary" title="Unlock this marker so you can drag it">Move</button>
       <button id="popup-edit" class="secondary">Edit</button>
       <button id="popup-close" class="secondary">Close</button>
     </div>
