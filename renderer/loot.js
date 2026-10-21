@@ -201,25 +201,45 @@
     return rows.find((b) => (b.vendorId || b.id) === id) || null;
   }
 
+  // An entry is { html, run?, disabled? }. `run` makes it clickable; an entry may also be
+  // a promise (the map lookup is async), shown as "…" until it settles.
+  let menuToken = 0, menuRuns = [];
   function openMenu(anchor) {
     const v = vendorOf(anchor.dataset.vid);
     if (!v) return;
+    const token = ++menuToken;
+    menuRuns = [];
     const refusal = detail && (detail.refused || []).find((b) => b.vendorId === v.vendorId && b.mine);
     const entries = [{ html: '<a href="' + esc(v.wiki.url) + '" target="_blank" rel="noopener">' + (v.wiki.kind === 'search' ? 'Search the wiki for ' : 'Open wiki page for ') + esc(v.name) + ' ↗</a>' }];
-    for (const a of menuActions) { const e = a(v); if (e) entries.push(e); }
+    for (const a of menuActions) { try { entries.push(a(v)); } catch {} }
     if (selected && v.how !== 'confirmed') {
       entries.push(refusal
         ? { html: '<button data-mact="undo-refuse" data-id="' + esc(refusal.reportId) + '">Undo “doesn\'t buy ' + esc(selected.name) + '”</button>' }
         : v.how ? { html: '<button data-mact="refuse" data-vid="' + esc(v.vendorId) + '">Doesn\'t buy ' + esc(selected.name) + '</button>' } : null);
     }
-    menu.innerHTML = '<div class="loot-menu-title">' + esc(v.name) + '</div>' + entries.filter(Boolean).map((e) => '<div class="loot-menu-item' + (e.disabled ? ' disabled' : '') + '">' + e.html + '</div>').join('');
+    const itemHtml = (e) => {
+      if (!e) return '';
+      const inner = e.run ? '<button data-run="' + (menuRuns.push(e.run) - 1) + '">' + e.html + '</button>' : e.html;
+      return '<div class="loot-menu-item' + (e.disabled ? ' disabled' : '') + '">' + inner + '</div>';
+    };
+    const slots = entries.filter((e) => e !== null && e !== undefined);
+    menu.innerHTML = '<div class="loot-menu-title">' + esc(v.name) + '</div>' +
+      slots.map((e, i) => (typeof e.then === 'function' ? '<div class="loot-menu-slot" data-slot="' + i + '"><div class="loot-menu-item disabled">…</div></div>' : '<div class="loot-menu-slot" data-slot="' + i + '">' + itemHtml(e) + '</div>')).join('');
+    slots.forEach((e, i) => {
+      if (typeof e.then !== 'function') return;
+      e.then((entry) => {
+        if (token !== menuToken || menu.classList.contains('hidden')) return;
+        const slot = menu.querySelector('[data-slot="' + i + '"]');
+        if (slot) slot.innerHTML = itemHtml(entry);
+      }, () => { const slot = menu.querySelector('[data-slot="' + i + '"]'); if (slot) slot.innerHTML = ''; });
+    });
     menu.classList.remove('hidden');
     const r = anchor.getBoundingClientRect();
     menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
     menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px';
   }
 
-  // Lets another script add a menu entry: fn(vendor) -> { html, disabled? } or null.
+  // Lets another script add a menu entry: fn(vendor) -> an entry, a promise of one, or null.
   window.lootMenu = { add: (fn) => menuActions.push(fn) };
 
   async function refuse(vendorId) {
@@ -230,6 +250,8 @@
   }
 
   menu.addEventListener('click', async (e) => {
+    const run = e.target.closest('[data-run]');
+    if (run) { closeMenu(); return menuRuns[+run.dataset.run](); }
     const b = e.target.closest('[data-mact]');
     if (e.target.closest('a')) return closeMenu();
     if (!b) return;

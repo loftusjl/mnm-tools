@@ -8,6 +8,7 @@ const CATEGORIES = [
   { id: 'wood',     name: 'Wood',       color: '#8a5a2b', icon: '\u{1FAB5}' },
   { id: 'quest',    name: 'Quest NPCs', color: '#fff176', icon: '❗️' },
   { id: 'named',    name: 'Named Mobs', color: '#d6453c', icon: '\u{1F480}' },
+  { id: 'vendors',  name: 'Vendors',    color: '#26a69a', icon: '\u{1F6D2}' },
   { id: 'misc',     name: 'Other',      color: '#b0bec5', icon: '\u{1F4CD}' },
 ];
 
@@ -164,9 +165,9 @@ function communityWorld(m, sc) {
 // Community markers are stored in WEB-image pixels (the downscaled map the site shows).
 // The app draws on the full-res source image, so divide by the same scale export-maps
 // applied to convert a web-pixel coord back into this image's pixel space.
-function webScale() {
-  if (!mapImage) return 1;
-  const long = Math.max(mapImage.width, mapImage.height);
+function webScale(img = mapImage) {
+  if (!img) return 1;
+  const long = Math.max(img.width, img.height);
   return long > WEB_MAX ? WEB_MAX / long : 1;
 }
 
@@ -188,14 +189,14 @@ async function loadSiteMaps() {
 // Site-pixel → this-image-pixel divisor for a zone's markers. null means this install's
 // map is a different picture from the site's (other proportions), so site markers can't
 // be placed on it at all and are left off rather than drawn in the wrong spots.
-function siteScale(zoneName) {
-  if (!mapImage) return 1;
+function siteScale(zoneName, img = mapImage) {
+  if (!img) return 1;
   const z = siteMaps && siteMaps[zoneName];
   if (z && z.width && z.height) {
-    const sx = z.width / mapImage.width, sy = z.height / mapImage.height;
+    const sx = z.width / img.width, sy = z.height / img.height;
     return Math.abs(sx / sy - 1) < 0.03 ? sx : null;
   }
-  return webScale(); // site data without sizes yet: assume the same source image
+  return webScale(img); // site data without sizes yet: assume the same source image
 }
 
 // Pull approved community markers from the API (read-only). Best-effort: a failure
@@ -318,6 +319,8 @@ function draw() {
   }
   // A community marker being moved gets the same ring
   if (moveState && moveState.community) { const cp = toScreen(moveState.x, moveState.y); drawMoveRing(cp); }
+  if (highlight) drawHighlight();
+  syncPin();
   if (atlasAlign) drawAlignPairs();
 }
 
@@ -374,7 +377,7 @@ function loadZoneImage(zone, thenFit) {
 function switchZone(zoneId, fit = true) {
   currentZoneId = zoneId;
   const zone = currentZone();
-  cancelMove();
+  if (!(moveState && moveState.sticky)) cancelMove(); // a vendor pin waiting to be placed outlives a zone switch
   hidePopup();
   loadZoneImage(zone, fit);
   if (fit) fitView();
@@ -382,6 +385,7 @@ function switchZone(zoneId, fit = true) {
   draw();
   if (atlasAlign) closeAtlasAlign(); // an alignment belongs to the zone it was opened on
   applyMapSource();
+  placementZoneChanged();
 }
 
 // Enable zone tools only when they're usable, and surface the first-time action.
@@ -581,7 +585,7 @@ canvas.addEventListener('click', (e) => {
 
     // Gathering (pick a tier), "Other" and "Quest NPCs" (need a name) get the dialog
     // even in quick-add; the tier picker pre-selects your last pick so repeats are quick.
-    if (GATHERING[cat.id] || cat.id === 'misc' || cat.id === 'quest') {
+    if (GATHERING[cat.id] || cat.id === 'misc' || cat.id === 'quest' || cat.id === 'vendors') {
       pendingWorldPos = pos;
       openMarkerModal(null, cat.id);
       return;
@@ -794,7 +798,7 @@ $('marker-save').addEventListener('click', () => {
   } else {
     label = $('marker-label').value.trim();
     // "Other" and "Quest / NPC" markers must say what they are
-    if ((category === 'misc' || category === 'quest') && !label && !notes) {
+    if ((category === 'misc' || category === 'quest' || category === 'vendors') && !label && !notes) {
       $('marker-error').textContent =
         'Give "' + catById(category).name + '" markers a name or a note — future you will thank you.';
       $('marker-error').classList.remove('hidden');
@@ -859,6 +863,7 @@ function cancelMove() {
 
 function saveMove() {
   if (!moveState) return;
+  if (moveState.sticky && placement && placement.zoneId !== currentZoneId) return; // wrong map: go to the vendor's zone first
   const s = moveState;
   endMove();
   s.onSave(s.x, s.y);
@@ -871,14 +876,21 @@ function resetMove() {
   s.reset();
 }
 
+// A pin is anchored at its tip; its round head sits PIN_HEAD pixels above that point.
+const PIN_HEAD = 20;
+let grab = { dx: 0, dy: 0 };   // cursor-to-anchor offset, so a grabbed marker does not jump
 function moveHit(e) {
   const rect = canvas.getBoundingClientRect();
   const p = toScreen(moveState.x, moveState.y);
-  return Math.hypot(p.x - (e.clientX - rect.left), p.y - (e.clientY - rect.top)) <= MARKER_RADIUS + 6;
+  const cy = p.y - (moveState.pin ? PIN_HEAD : 0);
+  return Math.hypot(p.x - (e.clientX - rect.left), cy - (e.clientY - rect.top)) <= MARKER_RADIUS + 6;
 }
 
 function grabMove(e) {
   if (!moveState || !moveHit(e)) return false;
+  const rect = canvas.getBoundingClientRect();
+  const p = toScreen(moveState.x, moveState.y);
+  grab = { dx: p.x - (e.clientX - rect.left), dy: p.y - (e.clientY - rect.top) };
   dragMove = true;
   dragMoved = true; // the click that follows the drag is not a click on the map
   canvas.classList.add('dragging');
@@ -887,7 +899,7 @@ function grabMove(e) {
 
 function dragMoveTo(e) {
   const rect = canvas.getBoundingClientRect();
-  const w = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+  const w = toWorld(e.clientX - rect.left + grab.dx, e.clientY - rect.top + grab.dy);
   const maxX = mapImage ? mapImage.width : GRID_SIZE, maxY = mapImage ? mapImage.height : GRID_SIZE;
   moveState.x = Math.max(0, Math.min(maxX, w.x));
   moveState.y = Math.max(0, Math.min(maxY, w.y));
@@ -2225,6 +2237,281 @@ function initAtlas() {
   $('aa-save').addEventListener('click', saveAtlasAlign);
   applyMapSource();
 }
+
+// ---- Vendors on the map ----
+// The Loot & Vendors panel (vendor-map.js) reaches the map only through window.mapHooks,
+// defined at the end of this block: find a vendor's markers, point at them, or hand the
+// player a pin to drop where the vendor stands.
+
+let highlight = null;   // { pts: [{x, y}], t0, until } rings pulsing around markers for a few seconds
+let placement = null;   // { name, zoneId, zoneName, notes, onDone } a vendor pin waiting to be placed
+let chipDrag = false;   // the pin is being dragged out of its corner chip
+const HIGHLIGHT_MS = 6000;
+
+// The map zone a wiki zone name ("Night Harbor") belongs to: same name, else the zone
+// whose words spell it, tightest fit first (as for the game's zone codes).
+function zoneByName(name) {
+  const k = normName(name || '');
+  if (!k) return null;
+  const words = (z) => (z.name.match(/[a-z0-9]+/gi) || []).length;
+  return data.zones.find((z) => normName(z.name) === k)
+    || data.zones.filter((z) => codeMatchesZoneName(k, z.name)).sort((a, b) => words(a) - words(b))[0]
+    || null;
+}
+
+// Pixel size of a zone's map, without disturbing the one on screen.
+const imageDims = new Map();
+function zoneImageSize(zone) {
+  if (zone.id === currentZoneId && mapImage) return Promise.resolve(mapImage);
+  if (!zone.image) return Promise.resolve(null);
+  if (!imageDims.has(zone.image)) {
+    imageDims.set(zone.image, new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.width, height: img.height });
+      img.onerror = () => resolve(null);
+      img.src = 'file:///' + zone.image.replace(/\\/g, '/');
+    }));
+  }
+  return imageDims.get(zone.image);
+}
+
+// Show a zone's own map (not the Atlas) and wait for its image.
+async function showZone(zone) {
+  if (atlasShowing()) setMapSource('own');
+  if (zone.id !== currentZoneId) switchZone(zone.id);
+  for (let i = 0; i < 60 && zone.image && !mapImage; i++) await new Promise((r) => setTimeout(r, 50));
+}
+
+// Markers in a zone (yours and the community's) whose label is this vendor's name.
+let communityTried = false;
+async function findVendorMarkers(vendorName, zoneName) {
+  const zone = zoneByName(zoneName);
+  if (!zone) return { zone: null, markers: [] };
+  const markers = VendorMarkers.matchMarkers(vendorName, zone.markers)
+    .map((m) => ({ x: m.x, y: m.y, community: false, category: m.category, label: m.label }));
+  if (!communityMarkers.length && !communityTried) { communityTried = true; await loadCommunityMarkers(); }
+  const size = await zoneImageSize(zone);
+  const sc = size ? siteScale(zone.name, size) : null;
+  if (sc) {
+    const here = communityMarkers.filter((m) => m.zone === zone.name && (m.map_id || 'official') === 'official');
+    for (const m of VendorMarkers.matchMarkers(vendorName, here)) {
+      const w = communityWorld(m, sc);
+      markers.push({ x: w.x, y: w.y, community: true, category: m.category, label: m.label });
+    }
+  }
+  return { zone: { id: zone.id, name: zone.name }, markers };
+}
+
+// ---- highlight ----
+
+// Bring the points into view: leave the map alone if they are comfortably on screen,
+// otherwise pan to centre them, zooming out (never in) only if they do not fit.
+function frameWorldPoints(pts) {
+  const w = canvas.clientWidth, h = canvas.clientHeight, margin = 90;
+  const onScreen = pts.every((pt) => { const p = toScreen(pt.x, pt.y); return p.x >= margin && p.x <= w - margin && p.y >= margin && p.y <= h - margin; });
+  if (onScreen) return;
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const fit = Math.min((w - 2 * margin) / Math.max(1, x1 - x0), (h - 2 * margin) / Math.max(1, y1 - y0));
+  view.scale = Math.max(minZoom(), Math.min(view.scale, fit));
+  view.x = w / 2 - ((x0 + x1) / 2) * view.scale;
+  view.y = h / 2 - ((y0 + y1) / 2) * view.scale;
+  userMovedView = true;
+}
+
+function stopHighlight() {
+  if (!highlight) return;
+  highlight = null;
+  draw();
+}
+
+function pulse() {
+  if (!highlight) return;
+  if (performance.now() > highlight.until) { stopHighlight(); return; }
+  draw();
+  requestAnimationFrame(pulse);
+}
+
+function drawHighlight() {
+  const t = (performance.now() - highlight.t0) / 1000;
+  ctx.save();
+  for (const pt of highlight.pts) {
+    const p = toScreen(pt.x, pt.y), ph = (t * 1.1) % 1;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255, 211, 77, ' + (1 - ph).toFixed(2) + ')';
+    ctx.beginPath(); ctx.arc(p.x, p.y, MARKER_RADIUS + 4 + ph * 24, 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowColor = '#ffd34d'; ctx.shadowBlur = 14;
+    ctx.strokeStyle = '#ffd34d';
+    ctx.beginPath(); ctx.arc(p.x, p.y, MARKER_RADIUS + 4, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+async function showMarkers(zoneName, markers) {
+  const zone = zoneByName(zoneName);
+  if (!zone || !markers.length) return false;
+  cancelMove();
+  await showZone(zone);
+  // Whatever is being pointed at has to be drawn.
+  markers.forEach((m) => hiddenCategories.delete(m.category));
+  if (markers.some((m) => m.community) && !showCommunity) {
+    $('community-enabled').checked = true;
+    $('community-enabled').dispatchEvent(new Event('change'));
+  }
+  refreshSidebar();
+  const pts = markers.map((m) => ({ x: m.x, y: m.y }));
+  frameWorldPoints(pts);
+  const now = performance.now();
+  highlight = { pts, t0: now, until: now + HIGHLIGHT_MS };
+  draw();
+  requestAnimationFrame(pulse);
+  return true;
+}
+// Any click or key ends the highlight early, so nothing keeps animating.
+window.addEventListener('mousedown', stopHighlight, true);
+window.addEventListener('keydown', stopHighlight, true);
+
+// ---- the vendor pin ----
+// A chip in the corner holds a pin labelled with the vendor. Drag it onto the map (its
+// tip lands under the cursor); the dropped pin stays draggable until Save, and only then
+// becomes an ordinary Vendors marker.
+
+let pinDom = null;
+function ensurePinDom() {
+  if (pinDom) return pinDom;
+  const chip = document.createElement('div');
+  chip.id = 'pin-chip';
+  chip.className = 'hidden';
+  chip.innerHTML = '<div class="pin-head inflow"><span>\u{1F6D2}</span></div>' +
+    '<div class="chip-text"><b></b><span class="chip-hint"></span><button class="chip-go secondary hidden">Go there</button></div>' +
+    '<button class="chip-x" title="Cancel">✕</button>';
+  $('map-area').appendChild(chip);
+  const pin = document.createElement('div');
+  pin.id = 'vendor-pin';
+  pin.className = 'vendor-pin hidden';
+  pin.innerHTML = '<div class="pin-head"><span>\u{1F6D2}</span></div>';
+  document.body.appendChild(pin);
+  pinDom = { chip, pin, name: chip.querySelector('b'), hint: chip.querySelector('.chip-hint'), go: chip.querySelector('.chip-go') };
+
+  chip.querySelector('.chip-x').addEventListener('click', () => cancelPlacement());
+  pinDom.go.addEventListener('click', async () => { const z = placement && data.zones.find((x) => x.id === placement.zoneId); if (z) await showZone(z); });
+  chip.addEventListener('mousedown', (e) => {
+    if (e.button || !placement || e.target.closest('.chip-x, .chip-go') || placement.zoneId !== currentZoneId) return;
+    e.preventDefault();
+    chipDrag = true;
+    floatPin(e);
+  });
+  window.addEventListener('mousemove', (e) => { if (chipDrag) floatPin(e); });
+  window.addEventListener('mouseup', (e) => {
+    if (!chipDrag) return;
+    chipDrag = false;
+    const r = canvas.getBoundingClientRect();
+    const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    pin.classList.add('hidden');
+    pin.classList.remove('floating');
+    if (over && placement) dropPin(toWorld(e.clientX - r.left, e.clientY - r.top)); // off the map: it snaps back to the chip
+  });
+  return pinDom;
+}
+
+// While dragging out of the chip the pin follows the cursor, tip at the pointer.
+function floatPin(e) {
+  pinDom.pin.classList.remove('hidden', 'dropped');
+  pinDom.pin.classList.add('floating');
+  pinDom.pin.style.left = e.clientX + 'px';
+  pinDom.pin.style.top = e.clientY + 'px';
+}
+
+function dropPin(w) {
+  startMove({ label: placement.name, x: w.x, y: w.y, pin: true, sticky: true, onSave: finishPlacement, onCancel: () => cancelPlacement() });
+  updateChip();
+  syncPin();
+  pinDom.pin.classList.remove('dropped');
+  void pinDom.pin.offsetWidth; // restart the drop animation
+  pinDom.pin.classList.add('dropped');
+}
+
+// The dropped pin is a DOM element so its glow is a CSS animation, not a redraw loop;
+// draw() only keeps it under the map position.
+function syncPin() {
+  if (!pinDom || chipDrag) return;
+  const pin = pinDom.pin;
+  const live = placement && moveState && moveState.pin && placement.zoneId === currentZoneId;
+  if (!live) { pin.classList.add('hidden'); return; }
+  const r = canvas.getBoundingClientRect(), p = toScreen(moveState.x, moveState.y);
+  const inside = p.x >= 0 && p.x <= r.width && p.y >= 0 && p.y <= r.height;
+  pin.classList.toggle('hidden', !inside);
+  pin.classList.remove('floating');
+  pin.style.left = r.left + p.x + 'px';
+  pin.style.top = r.top + p.y + 'px';
+}
+
+// The chip shows until the pin is dropped, and again whenever you are looking at a
+// zone other than the vendor's (the pin only drops on the vendor's own map).
+function updateChip() {
+  if (!pinDom) return;
+  if (!placement) { pinDom.chip.classList.add('hidden'); return; }
+  const here = placement.zoneId === currentZoneId;
+  const dropped = !!(moveState && moveState.pin);
+  pinDom.name.textContent = placement.name;
+  pinDom.hint.textContent = here ? 'Drag the pin onto the map' : placement.name + ' is in ' + placement.zoneName;
+  pinDom.go.textContent = 'Go to ' + placement.zoneName;
+  pinDom.go.classList.toggle('hidden', here);
+  pinDom.chip.classList.toggle('hidden', here && dropped);
+  if (dropped) $('move-bar').classList.toggle('hidden', !here);
+}
+
+function placementZoneChanged() {
+  if (!placement) return;
+  updateChip();
+  syncPin();
+}
+
+// silent: replace a placement without telling its owner (no onDone)
+function cancelPlacement(silent) {
+  if (!placement) return;
+  const p = placement;
+  placement = null;
+  chipDrag = false;
+  if (moveState && moveState.pin) endMove();
+  if (pinDom) { pinDom.chip.classList.add('hidden'); pinDom.pin.classList.add('hidden'); }
+  if (!silent && p.onDone) p.onDone('cancel');
+}
+
+function finishPlacement(x, y) {
+  const p = placement;
+  placement = null;
+  if (pinDom) { pinDom.chip.classList.add('hidden'); pinDom.pin.classList.add('hidden'); }
+  const zone = p && data.zones.find((z) => z.id === p.zoneId);
+  if (!zone) return;
+  const marker = { id: uid(), x, y, label: p.name, category: 'vendors', notes: p.notes || '' };
+  zone.markers.push(marker);
+  hiddenCategories.delete('vendors');
+  save();
+  refreshSidebar();
+  draw();
+  if (p.onDone) p.onDone('saved', marker);
+}
+
+async function startPlacement({ name, zoneName, notes, onDone }) {
+  const zone = zoneByName(zoneName);
+  if (!zone) return { error: 'There is no map for ' + zoneName + ' yet.' };
+  cancelPlacement(true);
+  cancelMove();
+  stopHighlight();
+  ensurePinDom();
+  placement = { name, zoneId: zone.id, zoneName: zone.name, notes, onDone };
+  await showZone(zone);
+  hiddenCategories.delete('vendors');
+  updateChip();
+  return { ok: true };
+}
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && placement && !moveState) cancelPlacement();
+});
+
+window.mapHooks = { findVendorMarkers, showMarkers, stopHighlight, startPlacement, cancelPlacement };
 
 (async function init() {
   if (isOverlay) document.body.classList.add('overlay');
