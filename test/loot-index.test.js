@@ -118,7 +118,7 @@ test('starting a new session closes the previous one', () => {
 
 test('item roll-up shows the newest price and the range across reports', () => {
   const state = reports.newState();
-  const mk = (price, ts) => ({ vendorId: 'v', vendorName: 'A cook', zone: 'Night Harbor', itemId: 'aaa', itemName: 'Rat Tooth', unitPrice: price, ts });
+  const mk = (price, ts) => ({ id: 'r' + ts, rev: 1, vendorId: 'v', vendorName: 'A cook', zone: 'Night Harbor', itemId: 'aaa', itemName: 'Rat Tooth', unitPrice: price, ts });
   state.reports.push(mk(10, 1), mk(12, 3), mk(11, 2));
   const [g] = reports.reportsForItem(state, 'Rat Tooth', 'aaa');
   assert.strictEqual(g.unitPrice, 12);

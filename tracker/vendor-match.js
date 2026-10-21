@@ -154,9 +154,10 @@ function matchEntry(entry, itemKey, itemTagSet) {
 
 // vendors: prepared vendors. Returns [{ vendor, how, via, tag? }] sorted
 // exact -> category -> any, each group by name.
-function vendorsFor(itemName, wiki, prepared) {
+function vendorsFor(itemName, wiki, prepared, tagOverride) {
   const key = nameKey(itemName);
-  const tags = itemTags(itemName, wiki);
+  // A player-set category replaces the automatic one entirely.
+  const tags = tagOverride && tagOverride.length ? new Set(tagOverride) : itemTags(itemName, wiki);
   const exact = [], category = [], any = [];
   for (const p of prepared) {
     let best = null;
