@@ -227,13 +227,16 @@ function loadVendorData() {
   try { aliases = JSON.parse(fs.readFileSync(path.join(__dirname, 'zone-aliases.json'), 'utf8')).zones || {}; } catch {}
   vendorData = {
     vendors,
-    byId: new Map(vendors.map((v) => [v.id, v])),
+    wikiIds: new Set(vendors.map((v) => v.id)),
     prepared: vendors.map(vendorMatch.prepareVendor),
     wiki: read('wiki.json').items || {},
     aliases,
   };
   return vendorData;
 }
+
+// The wiki's vendors with the player's overlays, plus vendors only the player knows.
+const allVendors = () => vendorReports.mergeVendors(loadVendorData().vendors, reports());
 
 // Ledger files for the loot list: Early Access only unless the player asks for beta too.
 function lootFiles(includeBeta) {
@@ -255,8 +258,17 @@ ipcMain.handle('loot-list', (event, opts = {}) => {
     startLootWatch();
     attributeVendorSales();
     const idx = lootIndex.buildLootIndex(lootFiles(!!opts.includeBeta));
-    const reported = new Set(reports().reports.map((r) => vendorMatch.nameKey(r.itemName)));
+    const live = vendorReports.currentReports(reports());
+    const reported = new Set(live.map((r) => vendorMatch.nameKey(r.itemName)));
     const items = idx.items.map((i) => Object.assign(i, { reported: reported.has(vendorMatch.nameKey(i.name)) }));
+    // An item you have added a price for but never looted still belongs in the list.
+    const have = new Set(items.map((i) => vendorMatch.nameKey(i.name)));
+    for (const r of live) {
+      const k = vendorMatch.nameKey(r.itemName);
+      if (have.has(k)) continue;
+      have.add(k);
+      items.push({ key: r.itemId || 'name:' + r.itemName, id: r.itemId || '', name: r.itemName, total: 0, byCharacter: {}, sources: {}, zones: {}, firstSeen: 0, lastSeen: 0, sales: { count: 0, lastUnit: 0, lastAt: 0, units: {} }, reported: true });
+    }
     return { items, recent: idx.recent, characters: idx.characters };
   } catch (e) { return { error: e.message }; }
 });
@@ -265,34 +277,67 @@ ipcMain.handle('loot-list', (event, opts = {}) => {
 // result carries inZone so the panel can filter without asking again.
 ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
   try {
-    const d = loadVendorData();
-    const confirmed = vendorReports.reportsForItem(reports(), name, id);
+    const d = loadVendorData(), state = reports();
+    const byId = new Map(allVendors().map((v) => [v.id, v]));
+    const key = id || 'name:' + name;
+    const override = vendorReports.overrideFor(state, key);
+    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
     const out = [];
     const taken = new Set();
-    for (const c of confirmed.sort((a, b) => b.ts - a.ts)) {
-      const v = d.byId.get(c.vendorId) || { name: c.vendorName, zone: c.zone };
+    for (const c of vendorReports.reportsForItem(state, name, id).sort((a, b) => b.ts - a.ts)) {
+      const v = byId.get(c.vendorId) || { id: c.vendorId, name: c.vendorName, zone: c.zone };
       taken.add(c.vendorId);
-      out.push({ vendorId: c.vendorId, name: v.name, zone: v.zone || '', location: v.location || '', how: 'confirmed', price: c.unitPrice, min: c.min, max: c.max, reports: c.count, ts: c.ts, inZone: vendorMatch.vendorInZone(v, zone, d.aliases) });
+      out.push(row(v, { how: 'confirmed', price: c.unitPrice, min: c.min, max: c.max, reports: c.count, ts: c.ts }));
     }
-    for (const m of vendorMatch.vendorsFor(name, d.wiki[name] || null, d.prepared)) {
+    for (const m of vendorMatch.vendorsFor(name, d.wiki[name] || null, d.prepared, override)) {
       if (taken.has(m.vendor.id)) continue; // a confirmed report replaces the guess
-      out.push({ vendorId: m.vendor.id, name: m.vendor.name, zone: m.vendor.zone || '', location: m.vendor.location || '', how: m.how, via: m.via, tag: m.tag ? vendorMatch.LABELS[m.tag] : '', inZone: vendorMatch.vendorInZone(m.vendor, zone, d.aliases) });
+      out.push(row(byId.get(m.vendor.id) || m.vendor, { how: m.how, via: m.via, tag: m.tag ? vendorMatch.LABELS[m.tag] : '' }));
     }
-    return { buyers: out, tags: [...vendorMatch.itemTags(name, d.wiki[name] || null)].map((t) => vendorMatch.LABELS[t]) };
+    const tagIds = override || [...vendorMatch.itemTags(name, d.wiki[name] || null)];
+    return {
+      buyers: out, key,
+      tags: tagIds.map((t) => vendorMatch.LABELS[t]), tagIds, tagsAuto: !override,
+      allTags: Object.entries(vendorMatch.LABELS).map(([tid, label]) => ({ id: tid, label })),
+      // Your own live reports for this item, so they can be corrected or removed.
+      mine: vendorReports.reportsOfItem(state, name, id).filter((r) => r.author === state.installId)
+        .map((r) => ({ id: r.id, vendorName: r.vendorName, zone: r.zone, unitPrice: r.unitPrice, ts: r.ts, src: r.src })),
+    };
   } catch (e) { return { error: e.message }; }
 });
 
-// Vendors to choose from for "I'm selling to…".
+// Vendors to choose from, for "selling to" and the add-a-price form.
 ipcMain.handle('vendor-list', (event, zone) => {
   const d = loadVendorData();
-  return d.vendors.map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
+  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
 });
+
+// Wiki item names for the item combobox (the panel adds the ones you have looted).
+ipcMain.handle('item-names', () => Object.keys(loadVendorData().wiki).sort());
+
+// The player's own data. Each change is a new revision saved straight away; a
+// rejected change comes back as { error } for the form to show.
+const mutate = (fn) => (event, arg) => {
+  try { const out = fn(reports(), arg || {}); saveReports(); return Object.assign({ ok: true }, out); } catch (e) { return { error: e.message }; }
+};
+ipcMain.handle('vendor-add', mutate((state, v) => {
+  const r = vendorReports.addVendor(state, v, loadVendorData().wikiIds, Date.now());
+  return { vendor: r.vendor, overlay: r.overlay };
+}));
+ipcMain.handle('report-add', mutate((state, r) => {
+  const v = allVendors().find((x) => x.id === r.vendorId);
+  if (!v) throw new Error('Pick a vendor.');
+  vendorReports.addReport(state, { vendorId: v.id, vendorName: v.name, zone: v.zone, itemId: r.itemId, itemName: r.itemName, unitPrice: r.unitPrice }, Date.now());
+  return {};
+}));
+ipcMain.handle('report-edit', mutate((state, r) => { vendorReports.reviseReport(state, r.id, r.unitPrice, Date.now()); return {}; }));
+ipcMain.handle('report-delete', mutate((state, r) => { vendorReports.deleteReport(state, r.id, Date.now()); return {}; }));
+ipcMain.handle('item-override', mutate((state, o) => { vendorReports.setItemOverride(state, o.key, o.tags, Date.now()); return {}; }));
 
 ipcMain.handle('vendor-session', (event, { action, vendorId } = {}) => {
   try {
     const state = reports();
     if (action === 'start') {
-      const v = loadVendorData().byId.get(vendorId);
+      const v = allVendors().find((x) => x.id === vendorId);
       if (!v) return { error: 'Unknown vendor.' };
       vendorReports.startSession(state, v, Date.now());
       saveReports();
@@ -307,7 +352,7 @@ ipcMain.handle('vendor-session', (event, { action, vendorId } = {}) => {
     const s = vendorReports.openSession(state);
     return {
       active: s ? { vendorId: s.vendorId, vendorName: s.vendorName, zone: s.zone, from: s.from } : null,
-      recorded: s ? state.reports.filter((r) => r.ts >= s.from && r.vendorId === s.vendorId).length : 0,
+      recorded: s ? vendorReports.currentReports(state).filter((r) => r.ts >= s.from && r.vendorId === s.vendorId).length : 0,
     };
   } catch (e) { return { error: e.message }; }
 });

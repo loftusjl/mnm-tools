@@ -740,3 +740,15 @@ body.overlay #map-area { background: rgba(var(--glass-rgb), 0.10); }
 .loot-b-confirmed { color: #5fbf6a; border-color: #5fbf6a; }
 .loot-b-exact { color: var(--accent); border-color: var(--accent); }
 .loot-foot { margin-top: 12px; }
+
+.loot-cat { margin: 8px 0 2px; font-size: 12px; }
+.loot-tags { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 10px; margin: 6px 0; }
+.loot-tags label { font-size: 12px; display: flex; align-items: center; gap: 5px; }
+.loot-error { color: #e0675b; font-size: 12px; }
+.loot-wiki { font-size: 11px; color: var(--accent); }
+button.linklike { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 11px; width: auto; }
+button.linklike:hover { text-decoration: underline; }
+.loot-filter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.loot-form { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.loot-form label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 4px; }
+.loot-newvendor { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); }

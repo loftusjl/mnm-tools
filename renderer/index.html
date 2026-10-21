@@ -282,6 +282,7 @@
         <h2>Loot &amp; Vendors</h2>
         <div class="replay-head-right">
           <label class="follow-row" title="Also list loot from closed-beta characters"><input type="checkbox" id="loot-beta" /><span>Include beta</span></label>
+          <button id="loot-add" class="secondary" title="Add what a vendor pays for an item, or add a vendor the list doesn't have">+ Add price</button>
           <button id="loot-x" class="modal-x" title="Close" aria-label="Close">✕</button>
         </div>
       </div>
@@ -300,6 +301,33 @@
         <div id="loot-detail" class="loot-detail"></div>
       </div>
       <div class="btn-row right"><button id="loot-close" class="primary">Done</button></div>
+    </div>
+  </div>
+
+  <!-- Add a vendor price -->
+  <div id="loot-form-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <h2>Add a vendor price</h2>
+      <div class="loot-form">
+        <label for="lf-item">Item</label>
+        <input id="lf-item" list="lf-items" placeholder="Start typing an item…" autocomplete="off" />
+        <datalist id="lf-items"></datalist>
+        <div id="lf-info" class="loot-meta"></div>
+        <label for="lf-vendor">Vendor</label>
+        <select id="lf-vendor"></select>
+        <div id="lf-newvendor" class="loot-newvendor hidden">
+          <input id="lf-vname" placeholder="Vendor name" />
+          <input id="lf-vzone" list="lf-zones" placeholder="Zone" />
+          <datalist id="lf-zones"></datalist>
+          <input id="lf-vloc" placeholder="Where to find them (optional)" />
+          <input id="lf-vwiki" placeholder="Wiki link (optional, https://…)" />
+          <div class="loot-meta">Saved on this computer only. If the wiki already lists this vendor, your link is added to theirs.</div>
+        </div>
+        <label for="lf-price">Price for one (e.g. 12c, 1s 5c)</label>
+        <input id="lf-price" placeholder="12c" autocomplete="off" />
+        <div id="lf-error" class="loot-error"></div>
+      </div>
+      <div class="btn-row right"><button id="lf-cancel" class="secondary">Cancel</button><button id="lf-save" class="primary">Save</button></div>
     </div>
   </div>
 
