@@ -160,3 +160,79 @@ test('a version-1 file (no vendors or overrides) loads and keeps its reports', (
   assert.deepStrictEqual([s.vendors, s.itemOverrides], [[], []]);
   assert.strictEqual(store.reportsForItem(s, 'Rat Tooth').length, 1);
 });
+
+// ---- "doesn't buy" reports ----
+
+const refuse = (state, over = {}, now = 2000) => store.addRefusal(state, Object.assign(
+  { vendorId: cook.id, vendorName: cook.name, zone: cook.zone, itemName: 'Spider Fang' }, over), now);
+
+test('a refusal hides a vendor from the buyers and is listed with the price it replaced', () => {
+  const state = store.newState();
+  manual(state);                                   // 12c at t=1000
+  refuse(state, {}, 2000);
+  const v = store.verdictsForItem(state, 'Spider Fang');
+  assert.deepStrictEqual(v.buyers, []);
+  assert.strictEqual(v.refused.length, 1);
+  assert.deepStrictEqual([v.refused[0].vendorId, v.refused[0].was, v.refused[0].mine], [cook.id, 12, true]);
+  assert.deepStrictEqual(store.reportsForItem(state, 'Spider Fang'), []);
+});
+
+test('the newest report wins: a later price turns a refusal back into a buyer', () => {
+  const state = store.newState();
+  refuse(state, {}, 1000);
+  store.addReport(state, { vendorId: cook.id, vendorName: cook.name, zone: cook.zone, itemName: 'Spider Fang', unitPrice: 9 }, 3000);
+  const v = store.verdictsForItem(state, 'Spider Fang');
+  assert.strictEqual(v.refused.length, 0);
+  assert.strictEqual(v.buyers[0].unitPrice, 9);
+});
+
+test('refusing twice is one refusal; undo (delete) brings the earlier price back', () => {
+  const state = store.newState();
+  manual(state);
+  const a = refuse(state, {}, 2000), b = refuse(state, {}, 2500);
+  assert.strictEqual(a.id, b.id);
+  assert.strictEqual(state.reports.filter((r) => r.kind === 'refuses').length, 1);
+  store.deleteReport(state, a.id, 3000);
+  const v = store.verdictsForItem(state, 'Spider Fang');
+  assert.deepStrictEqual([v.refused.length, v.buyers[0].unitPrice], [0, 12]);
+});
+
+test('a refusal needs a vendor and an item, has no price to edit, and only its author can undo it', () => {
+  const state = store.newState();
+  assert.throws(() => refuse(state, { vendorId: '' }), /vendor/i);
+  assert.throws(() => refuse(state, { itemName: ' ' }), /item/i);
+  const r = refuse(state);
+  assert.throws(() => store.reviseReport(state, r.id, 5, 3000), /no price/);
+  state.reports[0].author = 'another-install';
+  assert.throws(() => store.deleteReport(state, r.id, 3000), /your own/);
+  assert.strictEqual(store.verdictsForItem(state, 'Spider Fang').refused[0].mine, false);
+});
+
+test('a sale logged after a refusal makes the vendor a buyer again', () => {
+  const state = store.newState();
+  refuse(state, {}, 1000);
+  store.startSession(state, cook, 1500);
+  store.attributeSales(state, [{ t: 5000, character: 'Anm', evKey: 'k9', name: 'Spider Fang', id: '', qty: 1, unit: 4 }]);
+  const v = store.verdictsForItem(state, 'Spider Fang');
+  assert.deepStrictEqual([v.refused.length, v.buyers[0].unitPrice], [0, 4]);
+});
+
+// ---- wiki links ----
+
+test('wiki vendors link to a page named after them, keeping parentheses', () => {
+  assert.strictEqual(store.wikiLink({ name: 'A cook' }).url, 'https://monstersandmemories.miraheze.org/wiki/A_cook');
+  assert.strictEqual(store.wikiLink({ name: 'A fisherman (Faelindral)' }).url, 'https://monstersandmemories.miraheze.org/wiki/A_fisherman_(Faelindral)');
+  assert.strictEqual(store.wikiLink({ name: 'chef Belle' }).url, 'https://monstersandmemories.miraheze.org/wiki/Chef_Belle');
+  assert.match(store.wikiLink({ name: "Bob's #1 stall" }).url, /Bob's_%231_stall$/);
+});
+
+test('your saved link wins; local vendors without one get a wiki search', () => {
+  assert.deepStrictEqual(store.wikiLink({ name: 'A cook', wikiUrl: 'https://example.org/x' }), { url: 'https://example.org/x', kind: 'saved' });
+  const l = store.wikiLink({ name: 'Alric Mercantile', source: 'local' });
+  assert.strictEqual(l.kind, 'search');
+  assert.match(l.url, /Special:Search.*search=Alric%20Mercantile/);
+});
+
+test('every wiki vendor gets a page link', () => {
+  for (const v of wikiVendors) assert.match(store.wikiLink(v).url, /\/wiki\/[A-Z]/);
+});

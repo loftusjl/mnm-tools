@@ -258,7 +258,7 @@ ipcMain.handle('loot-list', (event, opts = {}) => {
     startLootWatch();
     attributeVendorSales();
     const idx = lootIndex.buildLootIndex(lootFiles(!!opts.includeBeta));
-    const live = vendorReports.currentReports(reports());
+    const live = vendorReports.currentReports(reports()).filter((r) => r.kind !== 'refuses');
     const reported = new Set(live.map((r) => vendorMatch.nameKey(r.itemName)));
     const items = idx.items.map((i) => Object.assign(i, { reported: reported.has(vendorMatch.nameKey(i.name)) }));
     // An item you have added a price for but never looted still belongs in the list.
@@ -281,10 +281,14 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
     const byId = new Map(allVendors().map((v) => [v.id, v]));
     const key = id || 'name:' + name;
     const override = vendorReports.overrideFor(state, key);
-    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
+    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
     const out = [];
     const taken = new Set();
-    for (const c of vendorReports.reportsForItem(state, name, id).sort((a, b) => b.ts - a.ts)) {
+    const verdicts = vendorReports.verdictsForItem(state, name, id);
+    // A vendor reported as not buying this is out of the guesses and listed on its own.
+    const refused = verdicts.refused.map((c) => row(byId.get(c.vendorId) || { id: c.vendorId, name: c.vendorName, zone: c.zone }, { reportId: c.id, was: c.was, ts: c.ts, mine: c.mine }));
+    verdicts.refused.forEach((c) => taken.add(c.vendorId));
+    for (const c of verdicts.buyers.sort((a, b) => b.ts - a.ts)) {
       const v = byId.get(c.vendorId) || { id: c.vendorId, name: c.vendorName, zone: c.zone };
       taken.add(c.vendorId);
       out.push(row(v, { how: 'confirmed', price: c.unitPrice, min: c.min, max: c.max, reports: c.count, ts: c.ts }));
@@ -295,12 +299,12 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
     }
     const tagIds = override || [...vendorMatch.itemTags(name, d.wiki[name] || null)];
     return {
-      buyers: out, key,
+      buyers: out, refused, key,
       tags: tagIds.map((t) => vendorMatch.LABELS[t]), tagIds, tagsAuto: !override,
       allTags: Object.entries(vendorMatch.LABELS).map(([tid, label]) => ({ id: tid, label })),
       // Your own live reports for this item, so they can be corrected or removed.
       mine: vendorReports.reportsOfItem(state, name, id).filter((r) => r.author === state.installId)
-        .map((r) => ({ id: r.id, vendorName: r.vendorName, zone: r.zone, unitPrice: r.unitPrice, ts: r.ts, src: r.src })),
+        .map((r) => ({ id: r.id, vendorName: r.vendorName, zone: r.zone, unitPrice: r.unitPrice, ts: r.ts, src: r.src, kind: r.kind || 'buys' })),
     };
   } catch (e) { return { error: e.message }; }
 });
@@ -308,7 +312,7 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
 // Vendors to choose from, for "selling to" and the add-a-price form.
 ipcMain.handle('vendor-list', (event, zone) => {
   const d = loadVendorData();
-  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
+  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
 });
 
 // Wiki item names for the item combobox (the panel adds the ones you have looted).
@@ -327,6 +331,12 @@ ipcMain.handle('report-add', mutate((state, r) => {
   const v = allVendors().find((x) => x.id === r.vendorId);
   if (!v) throw new Error('Pick a vendor.');
   vendorReports.addReport(state, { vendorId: v.id, vendorName: v.name, zone: v.zone, itemId: r.itemId, itemName: r.itemName, unitPrice: r.unitPrice }, Date.now());
+  return {};
+}));
+ipcMain.handle('report-refuse', mutate((state, r) => {
+  const v = allVendors().find((x) => x.id === r.vendorId);
+  if (!v) throw new Error('Pick a vendor.');
+  vendorReports.addRefusal(state, { vendorId: v.id, vendorName: v.name, zone: v.zone, itemId: r.itemId, itemName: r.itemName }, Date.now());
   return {};
 }));
 ipcMain.handle('report-edit', mutate((state, r) => { vendorReports.reviseReport(state, r.id, r.unitPrice, Date.now()); return {}; }));

@@ -752,3 +752,15 @@ button.linklike:hover { text-decoration: underline; }
 .loot-form { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .loot-form label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 4px; }
 .loot-newvendor { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); }
+
+.loot-vname { font: inherit; }
+.loot-refused { margin-top: 10px; }
+.loot-refused summary { cursor: pointer; opacity: .8; }
+.loot-menu { position: fixed; z-index: 10000; min-width: 220px; background: var(--panel, #161a1f); border: 1px solid var(--line-2, #3a4550); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.5); padding: 4px 0; }
+.loot-menu-title { padding: 4px 12px; font-weight: bold; opacity: .7; }
+.loot-menu-item a, .loot-menu-item button { display: block; width: 100%; text-align: left; padding: 6px 12px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
+.loot-menu-item a:hover, .loot-menu-item button:hover { background: rgba(255,255,255,.1); }
+.loot-menu-item.disabled { opacity: .5; }
+.loot-no { opacity: .55; white-space: nowrap; font-size: 12px; }
+.loot-no:hover { opacity: 1; }
+.loot-wiki { white-space: nowrap; }

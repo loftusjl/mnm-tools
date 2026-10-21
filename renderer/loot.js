@@ -96,6 +96,9 @@
     any: ['Buys anything (reduced)', 'loot-b-any'],
   };
 
+  // The vendor's name opens a small action menu (see openMenu).
+  const vendorName = (b) => '<button class="linklike loot-vname" data-act="vmenu" data-vid="' + esc(b.vendorId) + '" title="Actions for this vendor"><b>' + esc(b.name) + '</b></button>';
+
   function buyerRow(b) {
     const [label, cls] = HOW[b.how] || ['', ''];
     let note = '';
@@ -104,9 +107,11 @@
         (b.min !== b.max ? ' (' + esc(coin(b.min)) + '–' + esc(coin(b.max)) + ')' : '') + ' · ' + esc(when(b.ts));
     } else if (b.how === 'category') note = 'buys ' + esc(b.tag || b.via);
     else if (b.how === 'exact') note = 'lists it by name';
-    const wiki = b.wikiUrl ? ' <a class="loot-wiki" href="' + esc(b.wikiUrl) + '" target="_blank" rel="noopener" title="Open the wiki page">wiki ↗</a>' : '';
-    return '<div class="loot-buyer"><div><span class="loot-badge ' + cls + '">' + esc(label) + '</span> <b>' + esc(b.name) + '</b>' +
-      (b.local ? ' <span class="loot-badge" title="A vendor you added">yours</span>' : '') + wiki + '</div>' +
+    const wiki = ' <a class="loot-wiki" href="' + esc(b.wiki.url) + '" target="_blank" rel="noopener" title="' + (b.wiki.kind === 'search' ? 'Search the wiki for this vendor' : 'Open the wiki page') + '">' + (b.wiki.kind === 'search' ? 'search wiki' : 'wiki') + ' ↗</a>';
+    // Only guesses can be wrong about a vendor; a confirmed price is the player's own evidence.
+    const no = b.how === 'confirmed' ? '' : ' <button class="linklike loot-no" data-act="refuse" data-vid="' + esc(b.vendorId) + '" title="Hide this guess: this vendor does not buy it">✕ doesn\'t buy</button>';
+    return '<div class="loot-buyer"><div><span class="loot-badge ' + cls + '">' + esc(label) + '</span> ' + vendorName(b) +
+      (b.local ? ' <span class="loot-badge" title="A vendor you added">yours</span>' : '') + wiki + no + '</div>' +
       '<div class="loot-meta">' + (note ? note + '<br>' : '') + esc(b.location || b.zone) + '</div></div>';
   }
 
@@ -144,6 +149,12 @@
         const zones = [...byZone.keys()].sort((a, b) => (byZone.get(b).some((x) => x.inZone) - byZone.get(a).some((x) => x.inZone)) || a.localeCompare(b));
         html += zones.map((z) => '<div class="replay-col-title">' + esc(z) + '</div>' + byZone.get(z).map(buyerRow).join('')).join('');
       }
+      const no = (detail.refused || []).filter((b) => !here || b.inZone);
+      if (no.length) {
+        html += '<details class="loot-refused"><summary>Doesn\'t buy (reported) — ' + no.length + '</summary>' + no.map((b) =>
+          '<div class="loot-buyer"><div>' + vendorName(b) + ' <span class="loot-meta">' + esc(b.zone) + '</span></div><div class="loot-meta">Reported ' + esc(when(b.ts)) +
+          (b.was ? ' · you had a price of ' + esc(coin(b.was)) : '') + (b.mine ? ' · <button class="linklike" data-act="undo-refuse" data-id="' + esc(b.reportId) + '">Undo</button>' : '') + '</div></div>').join('') + '</details>';
+      }
       if (detail.mine && detail.mine.length) html += '<div class="replay-col-title">Your reports</div>' + detail.mine.map(myReportHtml).join('');
       html += '<div class="loot-meta loot-foot">“Likely” means the wiki says this vendor buys that kind of item.</div>';
     }
@@ -164,6 +175,10 @@
   }
 
   function myReportHtml(r) {
+    if (r.kind === 'refuses') {
+      return '<div class="loot-buyer"><div><b>' + esc(r.vendorName) + '</b> <span class="loot-meta">' + esc(r.zone) + '</span></div><div class="loot-meta">Doesn\'t buy this · ' +
+        esc(when(r.ts)) + '<br><button class="linklike" data-act="undo-refuse" data-id="' + esc(r.id) + '">Undo</button></div></div>';
+    }
     if (editingReport === r.id) {
       return '<div class="loot-buyer"><div><b>' + esc(r.vendorName) + '</b></div><div><input class="loot-price" id="loot-rep-price" value="' + esc(coin(r.unitPrice)) + '" size="12"> ' +
         '<button class="secondary" data-act="rep-save" data-id="' + esc(r.id) + '">Save</button> <button class="linklike" data-act="rep-cancel">Cancel</button><span id="loot-rep-err" class="loot-error"></span></div></div>';
@@ -172,10 +187,70 @@
       esc(when(r.ts)) + (r.src === 'manual' ? ' · typed in' : '') + '<br><button class="linklike" data-act="rep-edit" data-id="' + esc(r.id) + '">Edit price</button> · <button class="linklike" data-act="rep-del" data-id="' + esc(r.id) + '">Delete</button></div></div>';
   }
 
+  // ---- vendor action menu ----
+  // One floating menu shared by every vendor name. Other features add their own
+  // entries through addMenuAction, so this file stays free of their code.
+  const menuActions = [];
+  const menu = document.createElement('div');
+  menu.className = 'loot-menu hidden';
+  document.body.appendChild(menu);
+  const closeMenu = () => menu.classList.add('hidden');
+
+  function vendorOf(id) {
+    const rows = [...(detail ? detail.buyers.concat(detail.refused || []) : []), ...vendors];
+    return rows.find((b) => (b.vendorId || b.id) === id) || null;
+  }
+
+  function openMenu(anchor) {
+    const v = vendorOf(anchor.dataset.vid);
+    if (!v) return;
+    const refusal = detail && (detail.refused || []).find((b) => b.vendorId === v.vendorId && b.mine);
+    const entries = [{ html: '<a href="' + esc(v.wiki.url) + '" target="_blank" rel="noopener">' + (v.wiki.kind === 'search' ? 'Search the wiki for ' : 'Open wiki page for ') + esc(v.name) + ' ↗</a>' }];
+    for (const a of menuActions) { const e = a(v); if (e) entries.push(e); }
+    if (selected && v.how !== 'confirmed') {
+      entries.push(refusal
+        ? { html: '<button data-mact="undo-refuse" data-id="' + esc(refusal.reportId) + '">Undo “doesn\'t buy ' + esc(selected.name) + '”</button>' }
+        : v.how ? { html: '<button data-mact="refuse" data-vid="' + esc(v.vendorId) + '">Doesn\'t buy ' + esc(selected.name) + '</button>' } : null);
+    }
+    menu.innerHTML = '<div class="loot-menu-title">' + esc(v.name) + '</div>' + entries.filter(Boolean).map((e) => '<div class="loot-menu-item' + (e.disabled ? ' disabled' : '') + '">' + e.html + '</div>').join('');
+    menu.classList.remove('hidden');
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px';
+  }
+
+  // Lets another script add a menu entry: fn(vendor) -> { html, disabled? } or null.
+  window.lootMenu = { add: (fn) => menuActions.push(fn) };
+
+  async function refuse(vendorId) {
+    if (!selected) return;
+    const r = await window.mapAPI.reportRefuse({ vendorId, itemName: selected.name, itemId: selected.id });
+    if (r && r.error) return;
+    return loadDetail();
+  }
+
+  menu.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-mact]');
+    if (e.target.closest('a')) return closeMenu();
+    if (!b) return;
+    closeMenu();
+    if (b.dataset.mact === 'refuse') await refuse(b.dataset.vid);
+    else if (b.dataset.mact === 'undo-refuse') { await window.mapAPI.reportDelete({ id: b.dataset.id }); await refresh(); }
+  });
+  document.addEventListener('mousedown', (e) => { if (!menu.contains(e.target) && !e.target.closest('[data-act="vmenu"]')) closeMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+  el('loot-detail').addEventListener('scroll', closeMenu);
+
   async function onDetailClick(e) {
     const btn = e.target.closest('[data-act]');
     if (!btn || !selected) return;
     const act = btn.dataset.act;
+    if (act === 'vmenu') return openMenu(btn);
+    if (act === 'refuse') return refuse(btn.dataset.vid);
+    if (act === 'undo-refuse') {
+      await window.mapAPI.reportDelete({ id: btn.dataset.id });
+      return refresh();
+    }
     if (act === 'z-here') { zoneMode = 'here'; return renderDetail(); }
     if (act === 'z-all') { zoneMode = 'all'; return renderDetail(); }
     if (act === 'add-for') return openForm(selected);

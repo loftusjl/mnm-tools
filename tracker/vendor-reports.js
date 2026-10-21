@@ -105,23 +105,32 @@ function reportsOfItem(state, itemName, itemId) {
   return currentReports(state).filter((r) => (itemId && r.itemId === itemId) || nameKey(r.itemName) === key);
 }
 
-// Per-vendor roll-up of what has been reported for one item: newest price wins,
-// with the range across reports so disagreement stays visible.
-function reportsForItem(state, itemName, itemId) {
+// Per-vendor verdicts on one item, newest report wins: a later price turns a refusal
+// back into a buyer, a later "doesn't buy" hides earlier prices. Buyers carry the
+// price roll-up (newest price, range across their price reports); refusals carry the
+// price they replaced, so the disagreement stays visible.
+function verdictsForItem(state, itemName, itemId) {
   const byVendor = new Map();
   for (const r of reportsOfItem(state, itemName, itemId)) {
     let g = byVendor.get(r.vendorId);
-    if (!g) { g = { vendorId: r.vendorId, vendorName: r.vendorName, zone: r.zone, latest: r, min: r.unitPrice, max: r.unitPrice, count: 0 }; byVendor.set(r.vendorId, g); }
-    g.count++;
-    g.min = Math.min(g.min, r.unitPrice);
-    g.max = Math.max(g.max, r.unitPrice);
+    if (!g) { g = { vendorId: r.vendorId, vendorName: r.vendorName, zone: r.zone, latest: r, prices: [] }; byVendor.set(r.vendorId, g); }
+    if (r.kind !== 'refuses') g.prices.push(r);
     if (r.ts >= g.latest.ts) g.latest = r;
   }
-  return [...byVendor.values()].map((g) => ({
-    vendorId: g.vendorId, vendorName: g.vendorName, zone: g.zone,
-    unitPrice: g.latest.unitPrice, ts: g.latest.ts, count: g.count, min: g.min, max: g.max,
-  }));
+  const buyers = [], refused = [];
+  for (const g of byVendor.values()) {
+    const last = g.prices.reduce((m, r) => (!m || r.ts >= m.ts ? r : m), null);
+    const lo = g.prices.reduce((m, r) => Math.min(m, r.unitPrice), Infinity);
+    const hi = g.prices.reduce((m, r) => Math.max(m, r.unitPrice), 0);
+    if (g.latest.kind === 'refuses') {
+      refused.push({ id: g.latest.id, vendorId: g.vendorId, vendorName: g.vendorName, zone: g.zone, ts: g.latest.ts, mine: g.latest.author === state.installId, was: last ? last.unitPrice : 0 });
+    } else {
+      buyers.push({ vendorId: g.vendorId, vendorName: g.vendorName, zone: g.zone, unitPrice: last.unitPrice, ts: last.ts, count: g.prices.length, min: lo, max: hi });
+    }
+  }
+  return { buyers, refused };
 }
+const reportsForItem = (state, itemName, itemId) => verdictsForItem(state, itemName, itemId).buyers;
 
 // ---- revisions ----------------------------------------------------------
 
@@ -153,6 +162,23 @@ function addReport(state, { vendorId: vid, vendorName, zone, itemId, itemName, u
   return r;
 }
 
+// "This vendor does not buy this item": no price, one live refusal per vendor+item
+// (asking again returns the existing one). Undo = deleteReport on it.
+function addRefusal(state, { vendorId: vid, vendorName, zone, itemId, itemName }, now) {
+  if (!vid || !vendorName) throw new Error('Pick a vendor.');
+  if (!itemName || !String(itemName).trim()) throw new Error('Pick an item.');
+  const mine = reportsOfItem(state, itemName, itemId).filter((r) => r.vendorId === vid && r.author === state.installId);
+  const newest = mine.reduce((m, r) => (!m || r.ts >= m.ts ? r : m), null);
+  if (newest && newest.kind === 'refuses') return newest;
+  const r = {
+    id: crypto.randomUUID(), rev: 1, kind: 'refuses', vendorId: vid, vendorName, zone: zone || '',
+    itemId: itemId || '', itemName: String(itemName).trim(), unitPrice: 0, qty: 0, ts: now,
+    author: state.installId, src: 'manual', evKey: '', votes: { up: 0, down: 0 }, sync: { state: 'local' },
+  };
+  state.reports.push(r);
+  return r;
+}
+
 // Only your own reports can be edited or deleted (a shared service would enforce the
 // same rule); both add a new revision and leave the earlier ones in place.
 function ownReport(state, id) {
@@ -163,6 +189,7 @@ function ownReport(state, id) {
 }
 function reviseReport(state, id, unitPrice, now) {
   const cur = ownReport(state, id);
+  if (cur.kind === 'refuses') throw new Error('A "doesn\'t buy" report has no price to edit.');
   const price = Math.round(Number(unitPrice));
   if (!(price >= 1)) throw new Error('Enter what the vendor pays (at least 1 copper).');
   const r = Object.assign({}, cur, { rev: cur.rev + 1, unitPrice: price, ts: now, votes: { up: 0, down: 0 } });
@@ -186,6 +213,22 @@ function cleanWikiUrl(url) {
   try { u = new URL(t); } catch { throw new Error('That wiki link is not a valid address.'); }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('The wiki link must start with https://');
   return u.href;
+}
+
+// Where to read about a vendor. A link the player saved wins; a wiki vendor's page is
+// named after the vendor (the vendor list already carries disambiguators such as
+// "A fisherman (Faelindral)"); a vendor only the player knows falls back to a wiki
+// search. Returns { url, kind: 'saved' | 'page' | 'search' }.
+const WIKI_BASE = 'https://monstersandmemories.miraheze.org/';
+function wikiLink(vendor) {
+  if (vendor.wikiUrl) return { url: vendor.wikiUrl, kind: 'saved' };
+  const name = String(vendor.name || '').trim();
+  if (vendor.source === 'local' || !name) {
+    return { url: WIKI_BASE + 'w/index.php?title=Special:Search&go=Go&search=' + encodeURIComponent(name), kind: 'search' };
+  }
+  const title = (name[0].toUpperCase() + name.slice(1)).replace(/ /g, '_');
+  const path = encodeURIComponent(title).replace(/%28/g, '(').replace(/%29/g, ')').replace(/%27/g, "'");
+  return { url: WIKI_BASE + 'wiki/' + path, kind: 'page' };
 }
 
 // Create a vendor, or - when the wiki already lists one with the same name and zone -
@@ -240,4 +283,4 @@ function overrideFor(state, key) {
 }
 
 module.exports = {
-  currentReports, reportsOfItem, addReport, reviseReport, deleteReport, cleanWikiUrl, addVendor, mergeVendors, setItemOverride, overrideFor, newState, loadState, saveState, vendorId, openSession, startSession, endSession, attributeSales, reportsForItem };
+  currentReports, reportsOfItem, addReport, addRefusal, verdictsForItem, wikiLink, reviseReport, deleteReport, cleanWikiUrl, addVendor, mergeVendors, setItemOverride, overrideFor, newState, loadState, saveState, vendorId, openSession, startSession, endSession, attributeSales, reportsForItem };

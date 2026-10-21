@@ -64,7 +64,8 @@ new file reads and no new event types.
   that vendor is selected are saved as "vendor X bought item Y for Z". The ledger
   does not say which vendor bought an item, so the vendor is the player's own input.
 - The player can also type things in: a price a vendor pays, a vendor the wiki
-  doesn't list (or a wiki link for one it does), and a corrected category for an
+  doesn't list (or a wiki link for one it does), a "this vendor doesn't buy this"
+  note, and a corrected category for an
   item. These are the player's own entries, stored in the same local file. Edits
   and deletes are kept as revisions in that file.
 - Those reports carry a random per-install id. They never carry a character name.

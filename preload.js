@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('mapAPI', {
   itemNames: () => ipcRenderer.invoke('item-names'),
   vendorAdd: (v) => ipcRenderer.invoke('vendor-add', v),
   reportAdd: (r) => ipcRenderer.invoke('report-add', r),
+  reportRefuse: (r) => ipcRenderer.invoke('report-refuse', r),
   reportEdit: (r) => ipcRenderer.invoke('report-edit', r),
   reportDelete: (r) => ipcRenderer.invoke('report-delete', r),
   itemOverride: (o) => ipcRenderer.invoke('item-override', o),
