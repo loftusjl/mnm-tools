@@ -346,13 +346,16 @@
 
   // "Name — Zone" is what the combo shows and inserts, so same-named vendors in different
   // zones ("A cook") can be told apart. A bare name also works when it is unambiguous.
-  const vendorLabel = (v) => v.name + ' — ' + v.zone;
+  // The Atlas titles a pin by its role ("Quartermaster") with the NPC's name beneath, so the
+  // combo shows both and either one finds it.
+  const sameRole = (v) => v.role && v.role.toLowerCase() !== v.name.toLowerCase();
+  const vendorLabel = (v) => (sameRole(v) ? v.role + ' (' + v.name + ')' : v.name) + ' — ' + v.zone;
   function resolveVendor(text) {
     const t = text.trim().toLowerCase();
     if (!t) return null;
     const exact = vendors.find((v) => vendorLabel(v).toLowerCase() === t);
     if (exact) return exact;
-    const named = vendors.filter((v) => v.name.toLowerCase() === t);
+    const named = vendors.filter((v) => v.name.toLowerCase() === t || (sameRole(v) && v.role.toLowerCase() === t));
     return named.find((v) => v.inZone) || (named.length === 1 ? named[0] : null);
   }
 

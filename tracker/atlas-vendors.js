@@ -6,6 +6,8 @@
 // selling to") into vendor entries and merges them into the wiki's list. Pure: fetching and caching
 // live in main.js.
 //
+// The Atlas titles a pin by its role ("Quartermaster") and gives the NPC's name as a
+// subtitle, so both are kept: players look for the role, the ledger-minded for the name.
 // Atlas pins say who and where, not what they buy: merged vendors keep the wiki's buy
 // list; Atlas-only vendors start with none and gain prices through the player's reports.
 // ---------------------------------------------------------------
@@ -23,7 +25,7 @@ function parseAtlasVendors(maps, markersByMap) {
     for (const m of (markersByMap && markersByMap[map.id]) || []) {
       if (!m || !NPC_KINDS.includes(m.category) || !m.name) continue;
       out.push({
-        npc: m.category !== 'Vendor',
+        npc: m.category !== 'Vendor', role: String(m.vendor || '').trim(),
         name: String(m.name).trim(), zone: map.title || map.id, location: String(m.note || '').trim(),
         atlasWiki: /^https?:\/\//.test(m.wiki || '') ? m.wiki : '',
         atlas: { map: map.id, place: m.id, wikiId: m.wikiId || '', level: m.level || '' },
@@ -55,14 +57,14 @@ function mergeAtlas(wikiVendors, atlasList) {
   }
   const merged = wikiVendors.map((v) => {
     const a = hit.get(v.id);
-    return a ? Object.assign({}, v, { atlas: a.atlas, atlasWiki: a.atlasWiki, location: v.location || a.location }) : v;
+    return a ? Object.assign({}, v, { atlas: a.atlas, atlasWiki: a.atlasWiki, role: a.role || '', location: v.location || a.location }) : v;
   });
   const seen = new Set();
   for (const a of only) {
     const id = atlasId(a);
     if (seen.has(id)) continue;
     seen.add(id);
-    merged.push({ id, name: a.name, zone: a.zone, location: a.location, atlas: a.atlas, atlasWiki: a.atlasWiki, npc: !!a.npc, buys: [], source: 'atlas' });
+    merged.push({ id, name: a.name, zone: a.zone, location: a.location, atlas: a.atlas, atlasWiki: a.atlasWiki, npc: !!a.npc, role: a.role || '', buys: [], source: 'atlas' });
   }
   return merged;
 }

@@ -62,3 +62,11 @@ test('the Atlas link is used for merged and Atlas vendors; saved link still wins
   const noLink = merged.find((v) => v.source === 'atlas' && v.name === 'Bag merchant') || { name: 'Bag merchant', source: 'atlas' };
   assert.strictEqual(store.wikiLink(noLink).kind, 'search');   // generic Atlas names have no reliable page
 });
+
+test('the Atlas role (how the pin is titled) is kept beside the NPC name', () => {
+  const list = av.parseAtlasVendors([{ id: 'underdocks', title: 'Underdocks' }], { underdocks: [
+    { id: 'wiki-quartermaster', name: 'Traven Keldress', category: 'Vendor', vendor: 'Quartermaster' }] });
+  assert.strictEqual(list[0].role, 'Quartermaster');
+  const merged = av.mergeAtlas([], list);
+  assert.deepStrictEqual([merged[0].name, merged[0].role], ['Traven Keldress', 'Quartermaster']);
+});
