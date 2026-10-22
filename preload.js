@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('mapAPI', {
   vendorSession: (req) => ipcRenderer.invoke('vendor-session', req),
   itemNames: () => ipcRenderer.invoke('item-names'),
   vendorAdd: (v) => ipcRenderer.invoke('vendor-add', v),
+  vendorRename: (r) => ipcRenderer.invoke('vendor-rename', r),
   reportAdd: (r) => ipcRenderer.invoke('report-add', r),
   reportRefuse: (r) => ipcRenderer.invoke('report-refuse', r),
   reportEdit: (r) => ipcRenderer.invoke('report-edit', r),

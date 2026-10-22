@@ -251,6 +251,21 @@ function addVendor(state, { name, zone, location, wikiUrl }, wikiIds, now) {
   return { vendor: v, overlay };
 }
 
+// Correct who a listed vendor really is ("the Atlas says Traven Keldress, it is Quartermaster
+// Llarne"). Only a local overlay: the id, zone, location and Atlas link are unchanged, and
+// the source data is never touched. `base` is the vendor as currently listed (wiki/Atlas).
+function renameVendor(state, base, name, now) {
+  const nm = String(name || '').trim();
+  if (!nm) throw new Error('Give the vendor a name.');
+  const prev = latestRevisions(state.vendors).find((v) => v.id === base.id);
+  const v = {
+    id: base.id, rev: prev ? prev.rev + 1 : 1, name: nm, zone: (prev && prev.zone) || base.zone || '',
+    location: prev ? prev.location : '', wikiUrl: prev ? prev.wikiUrl : '', ts: now, author: state.installId, sync: { state: 'local' },
+  };
+  state.vendors.push(v);
+  return v;
+}
+
 // The wiki's vendors with the player's overlays applied, plus the vendors only the
 // player knows. Local-only vendors have no "buys" list: they appear through reports.
 function mergeVendors(wikiVendors, state) {
@@ -259,7 +274,9 @@ function mergeVendors(wikiVendors, state) {
     const o = local.get(w.id);
     if (!o) return w;
     local.delete(w.id);
-    return Object.assign({}, w, { wikiUrl: o.wikiUrl || w.wikiUrl || '', location: o.location || w.location, edited: true });
+    // A rename keeps the vendor's id (so reports line up) and remembers who the source called them.
+    const renamed = o.name && nameKey(o.name) !== nameKey(w.name);   // a link saved under "a cook" is not a rename of "A cook"
+    return Object.assign({}, w, { name: renamed ? o.name : w.name, wikiUrl: o.wikiUrl || w.wikiUrl || '', location: o.location || w.location, edited: true }, renamed ? { listedAs: w.name } : {});
   });
   for (const v of local.values()) out.push({ id: v.id, name: v.name, zone: v.zone, location: v.location, wikiUrl: v.wikiUrl, buys: [], source: 'local' });
   return out;
@@ -285,4 +302,4 @@ function overrideFor(state, key) {
 }
 
 module.exports = {
-  currentReports, reportsOfItem, addReport, addRefusal, verdictsForItem, wikiLink, reviseReport, deleteReport, cleanWikiUrl, addVendor, mergeVendors, setItemOverride, overrideFor, newState, loadState, saveState, vendorId, openSession, startSession, endSession, attributeSales, reportsForItem };
+  currentReports, reportsOfItem, addReport, addRefusal, renameVendor, verdictsForItem, wikiLink, reviseReport, deleteReport, cleanWikiUrl, addVendor, mergeVendors, setItemOverride, overrideFor, newState, loadState, saveState, vendorId, openSession, startSession, endSession, attributeSales, reportsForItem };

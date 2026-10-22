@@ -247,3 +247,24 @@ test('selling to a local or Atlas vendor records reports under that vendor\'s ow
   const atlas = { id: 'atlas:underdocks:telar nur gta', name: "Telar Nur'gta", zone: 'Underdocks' };
   assert.strictEqual(store.startSession(state, atlas, 30).vendorId, atlas.id);
 });
+
+test('renaming a listed vendor keeps its id and remembers the listed name; the source stays intact', () => {
+  const state = store.newState();
+  const atlas = { id: 'atlas:underdocks:traven keldress', name: 'Traven Keldress', zone: 'Underdocks', location: 'Buy / sell weapons and armour.', buys: [], source: 'atlas' };
+  store.renameVendor(state, atlas, ' Quartermaster Llarne ', 5);
+  const [v] = store.mergeVendors([atlas], state);
+  assert.deepStrictEqual([v.id, v.name, v.listedAs, v.location, v.zone], [atlas.id, 'Quartermaster Llarne', 'Traven Keldress', 'Buy / sell weapons and armour.', 'Underdocks']);
+  assert.strictEqual(atlas.name, 'Traven Keldress');
+  assert.strictEqual(store.mergeVendors([atlas], state).length, 1);   // not duplicated
+  store.renameVendor(state, atlas, 'Quartermaster Llarne II', 6);     // a later rename is a new revision
+  assert.strictEqual(store.mergeVendors([atlas], state)[0].name, 'Quartermaster Llarne II');
+  assert.throws(() => store.renameVendor(state, atlas, '  ', 7), /name/);
+});
+
+test('a rename keeps a wiki link or location you saved earlier', () => {
+  const state = store.newState();
+  store.addVendor(state, { name: 'A cook', zone: 'Night Harbor', wikiUrl: 'https://example.org/c' }, wikiIds, 1);
+  store.renameVendor(state, cook, 'Cook Bram', 2);
+  const c = store.mergeVendors(wikiVendors, state).find((v) => v.id === cook.id);
+  assert.deepStrictEqual([c.name, c.wikiUrl], ['Cook Bram', 'https://example.org/c']);
+});

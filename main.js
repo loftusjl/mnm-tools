@@ -378,6 +378,12 @@ ipcMain.handle('vendor-add', mutate((state, v) => {
   const r = vendorReports.addVendor(state, v, loadVendorData().wikiIds, Date.now());
   return { vendor: r.vendor, overlay: r.overlay };
 }));
+ipcMain.handle('vendor-rename', mutate((state, r) => {
+  const base = allVendors().find((x) => x.id === r.vendorId);
+  if (!base || base.source === 'local') throw new Error('Only listed vendors can be renamed; edit a vendor you added by adding it again.');
+  vendorReports.renameVendor(state, base, r.name, Date.now());
+  return {};
+}));
 ipcMain.handle('report-add', mutate((state, r) => {
   const v = allVendors().find((x) => x.id === r.vendorId);
   if (!v) throw new Error('Pick a vendor.');

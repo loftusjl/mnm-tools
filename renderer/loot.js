@@ -223,6 +223,7 @@
         ? { html: '<button data-mact="undo-refuse" data-id="' + esc(refusal.reportId) + '">Undo “doesn\'t buy ' + esc(selected.name) + '”</button>' }
         : v.how ? { html: '<button data-mact="refuse" data-vid="' + esc(v.vendorId) + '">Doesn\'t buy ' + esc(selected.name) + '</button>' } : null);
     }
+    if (!v.local) entries.push({ html: 'Not who this is? Rename…', run: () => renameEditor(v, anchor) });
     const itemHtml = (e) => {
       if (!e) return '';
       const inner = e.run ? '<button data-run="' + (menuRuns.push(e.run) - 1) + '">' + e.html + '</button>' : e.html;
@@ -243,6 +244,29 @@
     const r = anchor.getBoundingClientRect();
     menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
     menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px';
+  }
+
+  // The vendor list can be wrong ("the Atlas says Traven Keldress, it is Quartermaster Llarne").
+  // A rename is local: same vendor, same place, your name for them.
+  function renameEditor(v, anchor) {
+    menuToken++;
+    menu.innerHTML = '<div class="loot-menu-title">Who is this really?</div><div class="loot-menu-form">' +
+      '<input id="loot-rename" value="' + esc(v.name) + '" size="28"> <button class="secondary" id="loot-rename-go">Save</button><div class="loot-meta">Listed as “' + esc(v.name) + '”. Only changes it on this computer.</div><span id="loot-rename-err" class="loot-error"></span></div>';
+    menu.classList.remove('hidden');
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px';
+    const input = el('loot-rename');
+    input.focus(); input.select();
+    const go = async () => {
+      const r = await window.mapAPI.vendorRename({ vendorId: v.vendorId || v.id, name: input.value });
+      if (r.error) { el('loot-rename-err').textContent = r.error; return; }
+      closeMenu();
+      await loadVendors();
+      await refresh();
+    };
+    el('loot-rename-go').addEventListener('click', go);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
   }
 
   // Lets another script add a menu entry: fn(vendor) -> an entry, a promise of one, or null.
@@ -323,17 +347,21 @@
       '<input id="loot-sell-pick" list="loot-sell-list" placeholder="Type a name, or pick one…" autocomplete="off">' +
       '<datalist id="loot-sell-list">' + [...here, ...elsewhere].map((v) => '<option value="' + esc(vendorLabel(v)) + '">' + (v.npc ? 'NPC' : '') + '</option>').join('') + '</datalist>' +
       '<button id="loot-sell-go" class="secondary" disabled>Start</button>' +
+      '<button id="loot-sell-rename" class="linklike hidden" title="The list has the wrong name for this vendor">Not who this is? Rename…</button>' +
       '<span class="loot-meta">Type the name of who you\'re standing at, then sell. Your sales are saved as confirmed prices for them. Not listed? Type the name and add it.</span>';
     const pick = el('loot-sell-pick'), go = el('loot-sell-go');
     const sync = () => {
       const text = pick.value.trim();
       go.disabled = !text;
-      go.textContent = !text || resolveVendor(text) ? 'Start' : 'Add “' + (text.length > 28 ? text.slice(0, 27) + '…' : text) + '” and start';
+      const hit = resolveVendor(text);
+      go.textContent = !text || hit ? 'Start' : 'Add “' + (text.length > 28 ? text.slice(0, 27) + '…' : text) + '” and start';
+      el('loot-sell-rename').classList.toggle('hidden', !hit || hit.local);
     };
     if (sellPick) { const v = vendors.find((x) => x.id === sellPick); if (v) pick.value = vendorLabel(v); }
     sellPick = '';
     sync();
     pick.addEventListener('input', sync);
+    el('loot-sell-rename').addEventListener('click', () => { const v = resolveVendor(pick.value); if (v) renameEditor(v, el('loot-sell-rename')); });
     pick.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !go.disabled) go.click(); });
     go.addEventListener('click', async () => {
       const text = pick.value.trim();
@@ -348,14 +376,14 @@
   // zones ("A cook") can be told apart. A bare name also works when it is unambiguous.
   // The Atlas titles a pin by its role ("Quartermaster") with the NPC's name beneath, so the
   // combo shows both and either one finds it.
-  const sameRole = (v) => v.role && v.role.toLowerCase() !== v.name.toLowerCase();
+  const sameRole = (v) => v.role && !v.name.toLowerCase().includes(v.role.toLowerCase());   // "Quartermaster Llarne" already says it
   const vendorLabel = (v) => (sameRole(v) ? v.role + ' (' + v.name + ')' : v.name) + ' — ' + v.zone;
   function resolveVendor(text) {
     const t = text.trim().toLowerCase();
     if (!t) return null;
     const exact = vendors.find((v) => vendorLabel(v).toLowerCase() === t);
     if (exact) return exact;
-    const named = vendors.filter((v) => v.name.toLowerCase() === t || (sameRole(v) && v.role.toLowerCase() === t));
+    const named = vendors.filter((v) => v.name.toLowerCase() === t || (v.role && v.role.toLowerCase() === t));
     return named.find((v) => v.inZone) || (named.length === 1 ? named[0] : null);
   }
 

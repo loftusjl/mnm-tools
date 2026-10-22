@@ -787,3 +787,5 @@ button.linklike:hover { text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) { .pin-head, #pin-chip, .vendor-pin.dropped { animation: none; } .pin-head { box-shadow: 0 0 10px 4px rgba(255, 211, 77, .8); } }
 #loot-back { position: fixed; z-index: 9000; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px; border: 1px solid #ffd34d; background: rgba(var(--glass-rgb), 0.96); color: inherit; font: inherit; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
 #loot-back:hover { background: rgba(255, 211, 77, .15); }
+.loot-menu-form { padding: 6px 12px 8px; }
+.loot-menu-form input { margin-bottom: 4px; }
