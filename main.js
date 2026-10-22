@@ -45,6 +45,11 @@ app.on('quit', (e, code) => logCrash('app-quit', { code }));
 // when Discord login finishes the Worker 302s to mnmmap://auth/?login=<session>, which
 // the OS routes back to this running instance. Single-instance so the link lands on the
 // app that opened it, not a second copy.
+// The MnM Atlas's own sign-in popup (https://www.mnmatlas.com/signin.html).
+function isAtlasSignIn(url) {
+  try { const u = new URL(url); return u.origin === 'https://www.mnmatlas.com' && u.pathname === '/signin.html'; } catch { return false; }
+}
+
 const DISCORD_AUTH_START = 'https://mnmdb-api.boisteroux.workers.dev/auth/discord/start?client=app';
 
 function handleAuthDeepLink(url) {
@@ -484,10 +489,28 @@ function createWindow(overlay = false, fromOverlay = false) {
   win.webContents.on('unresponsive', () => logCrash('window-unresponsive'));
 
   // Open external links (target="_blank") in the user's real browser, never
-  // inside the app window.
+  // inside the app window. One exception: the embedded Atlas signs you in through a small
+  // popup that hands the session back to the page that opened it, which only works if the
+  // popup is a window of this app (in your browser it has no page to hand back to).
   win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAtlasSignIn(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 520, height: 720, parent: win, autoHideMenuBar: true, title: 'Sign in',
+          webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: undefined },
+        },
+      };
+    }
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+  // The sign-in popup itself may not open further windows.
+  win.webContents.on('did-create-window', (child) => {
+    child.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+      return { action: 'deny' };
+    });
   });
 
   // Closing the window you're using closes the app, so take the other mode's hidden
