@@ -757,11 +757,6 @@ button.linklike:hover { text-decoration: underline; }
 .loot-vname { font: inherit; }
 .loot-refused { margin-top: 10px; }
 .loot-refused summary { cursor: pointer; opacity: .8; }
-.loot-menu { position: fixed; z-index: 10000; min-width: 220px; background: var(--panel, #161a1f); border: 1px solid var(--line-2, #3a4550); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.5); padding: 4px 0; }
-.loot-menu-title { padding: 4px 12px; font-weight: bold; opacity: .7; }
-.loot-menu-item a, .loot-menu-item button { display: block; width: 100%; text-align: left; padding: 6px 12px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
-.loot-menu-item a:hover, .loot-menu-item button:hover { background: rgba(255,255,255,.1); }
-.loot-menu-item.disabled { opacity: .5; }
 .loot-no { opacity: .55; white-space: nowrap; font-size: 12px; }
 .loot-no:hover { opacity: 1; }
 .loot-wiki { white-space: nowrap; }
@@ -787,5 +782,57 @@ button.linklike:hover { text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) { .pin-head, #pin-chip, .vendor-pin.dropped { animation: none; } .pin-head { box-shadow: 0 0 10px 4px rgba(255, 211, 77, .8); } }
 #loot-back { position: fixed; z-index: 9000; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px; border: 1px solid #ffd34d; background: rgba(var(--glass-rgb), 0.96); color: inherit; font: inherit; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
 #loot-back:hover { background: rgba(255, 211, 77, .15); }
-.loot-menu-form { padding: 6px 12px 8px; }
-.loot-menu-form input { margin-bottom: 4px; }
+
+/* ---- Vendor card ----
+   Mirrors the MnM Atlas marker popup (mnmatlas.com style.css): the same class names
+   (.tag, h3, .marker-who, .npc-card, .npc-tags, dl/dt/dd, .popup-body, .popup-actions,
+   .wiki-link, .community-note, .moved-note, .popup-delete) and the same declarations, scoped
+   to .loot-menu. The Atlas colour tokens are mapped onto this app's theme tokens so the card
+   follows light/dark (Atlas --muted is a background token, the app's --muted a text colour, so
+   backgrounds use --surface here); the heading face (IM Fell English, OFL) is bundled as the Atlas does. */
+@font-face { font-family: 'IM Fell English'; src: url('fonts/im-fell-english-regular.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: 'IM Fell English'; src: url('fonts/im-fell-english-italic.woff2') format('woff2'); font-style: italic; font-weight: 400; font-display: swap; }
+@font-face { font-family: 'IM Fell English SC'; src: url('fonts/im-fell-english-sc.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; }
+.loot-menu {
+  --background: var(--bg); --card: var(--panel); --popover: var(--panel); --foreground: var(--text);
+  --muted-foreground: var(--muted); --border: var(--line); --primary: var(--accent);
+  --amber-border: color-mix(in srgb, var(--accent) 25%, transparent); --shadow: 0 8px 32px rgba(13,10,8,.4); --radius: 3px;
+  --heading: 'IM Fell English', Georgia, 'Times New Roman', serif; --small-caps: 'IM Fell English SC', Georgia, serif;
+  --body: 'Outfit', 'Segoe UI', sans-serif;
+  position: fixed; z-index: 10000; margin: 0; padding: 13px 0 0; background: var(--popover); color: var(--foreground);
+  border-radius: var(--radius); border: 1px solid var(--amber-border); box-shadow: var(--shadow);
+  font: 12px/1.6 var(--body); min-width: 280px; max-width: 300px; overflow-wrap: anywhere;
+}
+.loot-menu button { flex: none; color: var(--foreground); border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); padding: 8px 12px; transition: background .12s, border-color .12s; font-family: var(--body); }
+/* Atlas hover is a fixed dark brown (#3c2e20 / #936133); derived from the theme here so light mode stays readable. */
+.loot-menu button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 16%, var(--surface)); border-color: color-mix(in srgb, var(--primary) 60%, var(--border)); }
+.loot-menu button:disabled { opacity: .45; cursor: default; }
+.loot-menu button:focus-visible, .loot-menu a:focus-visible, .loot-menu input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.loot-menu h3 { font-family: var(--heading); font-weight: normal; line-height: 1.15; font-size: 22px; margin: 2px 0 7px; }
+.loot-menu .tag { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--primary); }
+.loot-menu p { white-space: pre-wrap; margin: 8px 0; }
+.loot-menu .moved-note { font-size: 11px; font-style: italic; color: var(--muted-foreground); margin: 6px 0 2px; }
+.loot-menu .community-note { font-size: 11px; font-style: italic; color: var(--primary); margin: 6px 0 2px; }
+.loot-menu .marker-who { margin: -4px 0 7px; font-size: 13px; font-style: italic; color: var(--muted-foreground); }
+.loot-menu .wiki-link { display: block; width: max-content; max-width: 100%; margin: 6px 0 2px; font-weight: 600; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.loot-menu .wiki-link:hover, .loot-menu .wiki-link:focus-visible { color: var(--foreground); }
+.loot-menu > .tag, .loot-menu > h3, .loot-menu > .marker-who, .loot-menu .popup-body > * { margin-left: 20px; margin-right: 24px; }
+.loot-menu .popup-body { margin-left: 0; margin-right: 0; }
+.loot-menu .npc-card { margin: 8px 0 0; padding: 10px 24px 12px 20px; background: var(--surface); border-block: 1px solid var(--border); font-size: 12px; line-height: 1.45; }
+.loot-menu .npc-tags { margin: 0 0 6px; font: 13px/1.2 var(--small-caps); letter-spacing: .05em; color: var(--primary); }
+.loot-menu .npc-card dl { display: grid; grid-template-columns: max-content 1fr; margin: 0; }
+.loot-menu .npc-card dt, .loot-menu .npc-card dd { padding: 5px 0; border-top: 1px solid var(--border); }
+.loot-menu .npc-card dl > dt:first-of-type, .loot-menu .npc-card dl > dd:first-of-type { border-top: 0; }
+.loot-menu .npc-card dt { padding-right: 12px; color: var(--muted-foreground); font-size: 11px; }
+.loot-menu .npc-card dd { margin: 0; overflow-wrap: anywhere; }
+.loot-menu .popup-actions { display: flex; flex-wrap: wrap; gap: 5px; margin: 12px 0 0; padding: 10px 24px 12px 20px; border-top: 1px solid var(--border); background: var(--popover); }
+.loot-menu .npc-card + .popup-actions { margin-top: 0; border-top: 0; }
+.loot-menu .popup-actions > * { margin: 0; }
+.loot-menu .popup-actions button { flex: 1 1 auto; white-space: nowrap; display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 5px 7px; font-size: 12px; line-height: 1.2; text-align: center; color: var(--foreground); }
+.loot-menu .popup-actions button svg { width: 14px; height: 14px; flex: none; color: var(--primary); }
+.loot-menu .popup-actions .popup-delete, .loot-menu .popup-delete { color: var(--danger); }   /* Atlas: #f29579, which is too faint on the light theme */
+.loot-menu .popup-actions .popup-delete svg { color: inherit; }
+.loot-menu .popup-actions .slot { display: contents; }
+.loot-menu input { width: 100%; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--foreground); padding: 10px; font: inherit; }
+.loot-menu .rename-form label { display: block; margin: 8px 24px 3px 20px; font-size: 11px; color: var(--muted-foreground); }
+.loot-menu .rename-form input { width: calc(100% - 44px); }

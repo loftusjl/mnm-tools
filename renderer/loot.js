@@ -207,55 +207,86 @@
     return rows.find((b) => (b.vendorId || b.id) === id) || null;
   }
 
-  // An entry is { html, run?, disabled? }. `run` makes it clickable; an entry may also be
-  // a promise (the map lookup is async), shown as "…" until it settles.
+  // The vendor card reuses the Atlas marker popup's markup and class names (see the
+  // "Vendor card" block in styles.css): tag, h3, marker-who, npc-card, popup-actions.
+  // An action is { label, icon, run?, disabled?, danger?, title? }; it may also be a promise
+  // of one (the map lookup is async), shown as "…" until it settles.
+  const ICONS = {
+    pin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
+    compass: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+    x: '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>',
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+    undo: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+  };
+  const icon = (n) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[n] || '') + '</svg>';
+
   let menuToken = 0, menuRuns = [];
+  function actionHtml(e) {
+    if (!e) return '';
+    const inner = icon(e.icon) + '<span>' + esc(e.label) + '</span>';
+    if (e.disabled) return '<button disabled title="' + esc(e.title || '') + '">' + inner + '</button>';
+    return '<button' + (e.danger ? ' class="popup-delete"' : '') + ' data-run="' + (menuRuns.push(e.run) - 1) + '">' + inner + '</button>';
+  }
+
+  // What we know about the vendor, as the Atlas's NPC card lays it out (small-caps line, then label/value rows).
+  const list = (a, n) => (a.length > n ? a.slice(0, n).join(', ') + ' … +' + (a.length - n) + ' more' : a.join(', '));
+  function cardHead(v, withActions) {
+    const kicker = v.npc ? 'NPC' : v.local ? 'Your vendor' : 'Vendor';
+    const who = sameRole(v) ? v.role : '';
+    const rows = [['Zone', v.zone], ['Location', v.location], ['Race', v.race], ['Buys', list(v.buys || [], 6)], ['Sells', list(v.sells || [], 6)]].filter((r) => r[1]);
+    const source = v.local ? 'Added by you' : v.fromAtlas ? 'From the MnM Atlas · community contribution' : v.atlas ? 'From the wiki, also on the MnM Atlas' : 'From the wiki';
+    return '<div class="tag">' + esc(kicker) + '</div><h3>' + esc(v.name) + '</h3>' + (who ? '<div class="marker-who">' + esc(who) + '</div>' : '') +
+      '<div class="popup-body">' + (v.listedAs ? '<div class="moved-note">Listed as “' + esc(v.listedAs) + '”</div>' : '') +
+      '<a class="wiki-link" href="' + esc(v.wiki.url) + '" target="_blank" rel="noopener">' + (v.wiki.kind === 'search' ? 'Search the wiki' : 'Wiki page') + ' ↗</a>' +
+      '<div class="community-note">' + esc(source) + '</div></div>' +
+      (rows.length ? '<div class="npc-card"><dl>' + rows.map((r) => '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>').join('') + '</dl></div>' : '');
+  }
+
+  function placeMenu(anchor) {
+    menu.classList.remove('hidden');
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    menu.style.top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8)) + 'px';
+  }
+
   function openMenu(anchor) {
     const v = vendorOf(anchor.dataset.vid);
     if (!v) return;
     const token = ++menuToken;
     menuRuns = [];
     const refusal = detail && (detail.refused || []).find((b) => b.vendorId === v.vendorId && b.mine);
-    const entries = [{ html: '<a href="' + esc(v.wiki.url) + '" target="_blank" rel="noopener">' + (v.wiki.kind === 'search' ? 'Search the wiki for ' : 'Open wiki page for ') + esc(v.name) + ' ↗</a>' }];
-    for (const a of menuActions) { try { entries.push(a(v)); } catch {} }
+    const actions = [];
+    for (const a of menuActions) { try { actions.push(a(v)); } catch {} }
     if (selected && v.how !== 'confirmed') {
-      entries.push(refusal
-        ? { html: '<button data-mact="undo-refuse" data-id="' + esc(refusal.reportId) + '">Undo “doesn\'t buy ' + esc(selected.name) + '”</button>' }
-        : v.how ? { html: '<button data-mact="refuse" data-vid="' + esc(v.vendorId) + '">Doesn\'t buy ' + esc(selected.name) + '</button>' } : null);
+      actions.push(refusal
+        ? { label: 'Undo “doesn\'t buy”', icon: 'undo', run: async () => { await window.mapAPI.reportDelete({ id: refusal.reportId }); await refresh(); } }
+        : v.how ? { label: 'Doesn\'t buy ' + selected.name, icon: 'x', danger: true, run: () => refuse(v.vendorId) } : null);
     }
-    if (!v.local) entries.push({ html: 'Not who this is? Rename…', run: () => renameEditor(v, anchor) });
-    const itemHtml = (e) => {
-      if (!e) return '';
-      const inner = e.run ? '<button data-run="' + (menuRuns.push(e.run) - 1) + '">' + e.html + '</button>' : e.html;
-      return '<div class="loot-menu-item' + (e.disabled ? ' disabled' : '') + '">' + inner + '</div>';
-    };
-    const slots = entries.filter((e) => e !== null && e !== undefined);
-    menu.innerHTML = '<div class="loot-menu-title">' + esc(v.name) + '</div>' +
-      slots.map((e, i) => (typeof e.then === 'function' ? '<div class="loot-menu-slot" data-slot="' + i + '"><div class="loot-menu-item disabled">…</div></div>' : '<div class="loot-menu-slot" data-slot="' + i + '">' + itemHtml(e) + '</div>')).join('');
+    if (!v.local) actions.push({ label: 'Not who this is? Rename…', icon: 'edit', run: () => renameEditor(v, anchor) });
+    const slots = actions.filter((e) => e !== null && e !== undefined);
+    menu.innerHTML = cardHead(v) + '<div class="popup-actions">' + slots.map((e, i) =>
+      '<span class="slot" data-slot="' + i + '">' + (typeof e.then === 'function' ? '<button disabled><span>…</span></button>' : actionHtml(e)) + '</span>').join('') + '</div>';
     slots.forEach((e, i) => {
       if (typeof e.then !== 'function') return;
-      e.then((entry) => {
+      const fill = (html) => {
         if (token !== menuToken || menu.classList.contains('hidden')) return;
         const slot = menu.querySelector('[data-slot="' + i + '"]');
-        if (slot) slot.innerHTML = itemHtml(entry);
-      }, () => { const slot = menu.querySelector('[data-slot="' + i + '"]'); if (slot) slot.innerHTML = ''; });
+        if (slot) slot.innerHTML = html;
+        placeMenu(anchor);
+      };
+      e.then((entry) => fill(actionHtml(entry)), () => fill(''));
     });
-    menu.classList.remove('hidden');
-    const r = anchor.getBoundingClientRect();
-    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
-    menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px';
+    placeMenu(anchor);
   }
 
   // The vendor list can be wrong ("the Atlas says Traven Keldress, it is Quartermaster Llarne").
   // A rename is local: same vendor, same place, your name for them.
   function renameEditor(v, anchor) {
     menuToken++;
-    menu.innerHTML = '<div class="loot-menu-title">Who is this really?</div><div class="loot-menu-form">' +
-      '<input id="loot-rename" value="' + esc(v.name) + '" size="28"> <button class="secondary" id="loot-rename-go">Save</button><div class="loot-meta">Listed as “' + esc(v.name) + '”. Only changes it on this computer.</div><span id="loot-rename-err" class="loot-error"></span></div>';
-    menu.classList.remove('hidden');
-    const r = anchor.getBoundingClientRect();
-    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
-    menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px';
+    menu.innerHTML = cardHead(v) + '<div class="popup-body rename-form"><label for="loot-rename">Who is this really?</label>' +
+      '<input id="loot-rename" value="' + esc(v.name) + '"><div class="moved-note">Only changes it on this computer.</div><span id="loot-rename-err" class="loot-error"></span></div>' +
+      '<div class="popup-actions"><button id="loot-rename-go">' + icon('edit') + '<span>Save</span></button></div>';
+    placeMenu(anchor);
     const input = el('loot-rename');
     input.focus(); input.select();
     const go = async () => {
@@ -279,15 +310,10 @@
     return loadDetail();
   }
 
-  menu.addEventListener('click', async (e) => {
+  menu.addEventListener('click', (e) => {
     const run = e.target.closest('[data-run]');
     if (run) { closeMenu(); return menuRuns[+run.dataset.run](); }
-    const b = e.target.closest('[data-mact]');
-    if (e.target.closest('a')) return closeMenu();
-    if (!b) return;
-    closeMenu();
-    if (b.dataset.mact === 'refuse') await refuse(b.dataset.vid);
-    else if (b.dataset.mact === 'undo-refuse') { await window.mapAPI.reportDelete({ id: b.dataset.id }); await refresh(); }
+    if (e.target.closest('a')) closeMenu();
   });
   document.addEventListener('mousedown', (e) => { if (!menu.contains(e.target) && !e.target.closest('[data-act="vmenu"]')) closeMenu(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });

@@ -7,7 +7,6 @@
 (() => {
   if (!window.lootMenu || !window.mapHooks) return;
   const el = (id) => document.getElementById(id);
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const hooks = window.mapHooks;
 
   // The panel is hidden while you look at the map; this pill brings it back (your
@@ -57,16 +56,16 @@
   window.lootMenu.add((v) => {
     if (!v.atlas) return null;
     return hooks.hasZone(v.zone)
-      ? { html: 'Show on Atlas map', run: () => showOnAtlas(v) }
-      : { disabled: true, html: '<span title="Add or import a map for this zone first">No ' + esc(v.zone) + ' map in the app</span>' };
+      ? { label: 'Show on Atlas map', icon: 'compass', run: () => showOnAtlas(v) }
+      : { label: 'Atlas map', icon: 'compass', disabled: true, title: 'Add or import a map for ' + v.zone + ' first' };
   });
 
   window.lootMenu.add(async (v) => {
-    if (!v.zone) return { disabled: true, html: '<span>No zone known for this vendor</span>' };
+    if (!v.zone) return { label: 'My map', icon: 'pin', disabled: true, title: 'No zone known for this vendor' };
     const found = await hooks.findVendorMarkers(v.name, v.zone);
-    if (!found.zone) return { disabled: true, html: '<span title="Add or import a map for this zone first">No map for ' + esc(v.zone) + ' yet</span>' };
+    if (!found.zone) return { label: 'My map', icon: 'pin', disabled: true, title: 'No map for ' + v.zone + ' yet: add or import one first' };
     return found.markers.length
-      ? { html: 'Highlight on my map', run: () => highlight(v, found) }
-      : { html: 'Place on my map', run: () => place(v) };
+      ? { label: 'Highlight on my map', icon: 'pin', run: () => highlight(v, found) }
+      : { label: 'Place on my map', icon: 'pin', run: () => place(v) };
   });
 })();

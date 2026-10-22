@@ -334,7 +334,7 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
     const byId = new Map(allVendors().map((v) => [v.id, v]));
     const key = id || 'name:' + name;
     const override = vendorReports.overrideFor(state, key);
-    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', npc: !!v.npc, role: v.role || '', atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
+    const row = (v, extra) => Object.assign({ vendorId: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', npc: !!v.npc, role: v.role || '', listedAs: v.listedAs || '', race: v.race || '', sells: v.sells || [], buys: v.buys || [], atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }, extra);
     const out = [];
     const taken = new Set();
     const verdicts = vendorReports.verdictsForItem(state, name, id);
@@ -365,7 +365,7 @@ ipcMain.handle('loot-vendors', (event, { name, id, zone } = {}) => {
 // Vendors to choose from, for "selling to" and the add-a-price form.
 ipcMain.handle('vendor-list', (event, zone) => {
   const d = loadVendorData();
-  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', npc: !!v.npc, role: v.role || '', atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
+  return allVendors().map((v) => ({ id: v.id, name: v.name, zone: v.zone || '', location: v.location || '', wikiUrl: v.wikiUrl || '', local: v.source === 'local', fromAtlas: v.source === 'atlas', npc: !!v.npc, role: v.role || '', listedAs: v.listedAs || '', race: v.race || '', sells: v.sells || [], buys: v.buys || [], atlas: v.atlas || null, wiki: vendorReports.wikiLink(v), inZone: vendorMatch.vendorInZone(v, zone, d.aliases) }));
 });
 
 // Wiki item names for the item combobox (the panel adds the ones you have looted).
